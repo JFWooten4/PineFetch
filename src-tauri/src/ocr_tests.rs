@@ -26,7 +26,7 @@ fn result(text: &str) -> OcrResult {
         segments: builder.segments,
         source_sha256: "a".repeat(64),
         engine_version:
-            r#"{"vision_request_revision":3,"macos_version":"synthetic","helper_version":"1"}"#
+            r#"{"vision_request_revision":3,"macos_version":"synthetic","helper_version":"2"}"#
                 .into(),
         settings_json: "{}".into(),
     }
@@ -96,9 +96,35 @@ fn grouping_preserves_positions_reappearances_numbers_and_single_frames() {
 }
 
 #[test]
+fn vision_edge_boxes_are_clipped_before_strict_protocol_validation() {
+    let cases: serde_json::Value =
+        serde_json::from_str(include_str!("../../test/fixtures/ocr-bounds.json")).unwrap();
+    for case in cases.as_array().unwrap() {
+        let Some(bounds) = case.get("visible").filter(|v| !v.is_null()) else {
+            continue;
+        };
+        let raw = serde_json::json!({"type":"frame","frame_id":9,"observations":[{
+            "text":"edge text / 12!", "confidence":0.3, "bounds":case["bounds"]
+        }]});
+        // These native observations used to abort the entire OCR run. The
+        // helper now clips them before emitting the strictly validated reply.
+        assert!(ocr_rules::validate_observations(&raw, 9).is_err());
+        let mut clipped = raw;
+        clipped["observations"][0]["bounds"] = bounds.clone();
+        let valid = ocr_rules::validate_observations(&clipped, 9).unwrap();
+        assert_eq!(valid[0].text, "edge text / 12!");
+        assert_eq!(valid[0].confidence, 0.3);
+        assert_eq!(
+            valid[0].bounds,
+            serde_json::from_value::<OcrBox>(bounds.clone()).unwrap()
+        );
+    }
+}
+
+#[test]
 fn variable_frame_times_and_invalid_protocol_data_are_explicit() {
     let ready = serde_json::json!({"type":"ready","protocol_version":1,"engine":"apple_vision",
-        "engine_version":{"helper_version":"1","vision_request_revision":3,"macos_version":"synthetic"},
+        "engine_version":{"helper_version":"2","vision_request_revision":3,"macos_version":"synthetic"},
         "settings":{"recognition_level":"accurate","uses_language_correction":false,"recognition_languages":["en-US"],"supported_languages":["en-US"]}});
     ocr_rules::validate_ready(&ready).unwrap();
     let mut unsupported = ready.clone();
@@ -393,7 +419,7 @@ fn tools(root: &TempRoot, helper_body: &str) -> OcrTools {
         ffmpeg:script(root,"frames",&format!("printf '%s\\n' '[Parsed_showinfo_1 @ fixture] n: 0 pts: 1 pts_time:1.31 fmt:rgba' >&2\ncat '{}'",png.display())) }
 }
 #[cfg(unix)]
-const READY: &str = r#"printf '%s\n' '{"type":"ready","protocol_version":1,"engine":"apple_vision","engine_version":{"helper_version":"1","vision_request_revision":3,"macos_version":"synthetic"},"settings":{"recognition_level":"accurate","uses_language_correction":false,"recognition_languages":["en-US"],"supported_languages":["en-US"]}}'"#;
+const READY: &str = r#"printf '%s\n' '{"type":"ready","protocol_version":1,"engine":"apple_vision","engine_version":{"helper_version":"2","vision_request_revision":3,"macos_version":"synthetic"},"settings":{"recognition_level":"accurate","uses_language_correction":false,"recognition_languages":["en-US"],"supported_languages":["en-US"]}}'"#;
 #[cfg(unix)]
 const FRAME: &str = r#"printf '%s\n' '{"type":"frame","frame_id":0,"observations":[{"text":"12 new paths","confidence":0.9,"bounds":{"x":0.1,"y":0.1,"width":0.2,"height":0.1}}]}'"#;
 

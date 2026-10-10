@@ -15,11 +15,12 @@ case "$OCR_ARCH" in
   *) echo "Unsupported Apple Vision helper architecture: $OCR_ARCH" >&2; exit 1 ;;
 esac
 OCR_SOURCE="$OCR_ROOT/native/vision-ocr.swift"
+OCR_BOUNDS_SOURCE="$OCR_ROOT/native/vision-ocr-bounds.swift"
 OCR_HELPER="$OCR_RUNTIME/vision-ocr-$OCR_ARCH"
 OCR_STAMP="$OCR_RUNTIME/vision-ocr-$OCR_ARCH.build"
 OCR_SDK="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}"
 OCR_BUILD_KEY="$({
-  shasum -a 256 "$OCR_SOURCE" "${BASH_SOURCE[0]}" | awk '{print $1}'
+  shasum -a 256 "$OCR_SOURCE" "$OCR_BOUNDS_SOURCE" "${BASH_SOURCE[0]}" | awk '{print $1}'
   printf '%s\n' "$OCR_ARCH" "$OCR_MIN_VERSION" "$OCR_SDK"
   if [[ -f "$OCR_SDK/SDKSettings.json" ]]; then shasum -a 256 "$OCR_SDK/SDKSettings.json" | awk '{print $1}'; fi
   xcrun swiftc --version
@@ -34,8 +35,11 @@ fi
 OCR_WORK="$(mktemp -d "${TMPDIR:-/tmp}/pinefetch-vision-build.XXXXXX")"
 trap 'rm -rf "$OCR_WORK"' EXIT
 mkdir -p "$OCR_RUNTIME"
+# Swift requires the top-level entry point to be named main.swift when compiling
+# multiple source files. The original source remains the watched build input.
+cp "$OCR_SOURCE" "$OCR_WORK/main.swift"
 xcrun swiftc -O -swift-version 5 -target "$OCR_ARCH-apple-macosx$OCR_MIN_VERSION" \
-  -sdk "$OCR_SDK" "$OCR_SOURCE" -o "$OCR_WORK/vision-ocr"
+  -sdk "$OCR_SDK" "$OCR_BOUNDS_SOURCE" "$OCR_WORK/main.swift" -o "$OCR_WORK/vision-ocr"
 codesign --force --sign - "$OCR_WORK/vision-ocr"
 printf '%s %s\n' "$OCR_BUILD_KEY" "$(shasum -a 256 "$OCR_WORK/vision-ocr" | awk '{print $1}')" > "$OCR_WORK/build"
 if [[ ! -x "$OCR_HELPER" ]] || ! cmp -s "$OCR_WORK/vision-ocr" "$OCR_HELPER"; then

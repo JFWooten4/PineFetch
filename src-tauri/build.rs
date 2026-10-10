@@ -1,5 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=../native/vision-ocr.swift");
+    println!("cargo:rerun-if-changed=../native/vision-ocr-bounds.swift");
     println!("cargo:rerun-if-changed=../scripts/prepare-ocr-runtime.sh");
     println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
     println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");

@@ -42,7 +42,12 @@ sampled frames joins a segment (bounding-box intersection-over-union at least
 0.6). Missing observations break the sequence. Later reappearances, different
 positions, numbers, URLs, handles, punctuation and negations remain distinct.
 Boxes use Vision's normalized full-frame coordinates with a **bottom-left**
-origin after orientation; segments store the first box and all observed times
+origin after orientation. Vision's enclosing rectangles can extend beyond the
+image for partially visible text. Helper version **2** intersects them with the
+normalized image rectangle before emitting observations. Wholly invisible
+observations are omitted; invalid native sizes or non-finite coordinates fail.
+Rust still rejects malformed replies and out-of-image boxes. The clipping policy
+is saved in settings; text and confidence remain unchanged. Segments store the first box and all observed times
 in milliseconds. Confidence validates native responses and is not shown as an
 accuracy percentage.
 
@@ -125,8 +130,13 @@ node scripts/test-ocr-native.mjs
 Rust tests use synthetic stores and isolated processes for migration/retry,
 retained and empty results, stale attempts, deletion, final cancellation, failed
 storage, changed sources, malformed/early-ending helpers, instance ownership
-and download isolation. UI tests check lazy loading, background continuation,
-progress/cancel, safe timestamped copying, retained results, empty success and
+and download isolation. An edge-box regression uses the native response that
+previously stopped a real 4K video at 9 and 48 seconds. Shared golden cases cover
+all four edges, invisible text and invalid geometry. The explicit native smoke
+compiles and exercises the actual Swift intersection code, while Rust tests
+check the clipped protocol output and continued rejection of invalid replies.
+UI tests check lazy loading, background continuation, progress/cancel,
+safe timestamped copying, retained results, empty success and
 late replies after entry changes.
 
 The explicit native smoke generates a VFR video with a nonzero timestamp origin,
@@ -136,7 +146,7 @@ is the packaged helper path. Developer tools generate this test fixture only;
 the shipped helper does not use them. No release/publishing occurs.
 
 Verified on macOS 26.7 arm64: the complete check/build gates (43 JavaScript and
-209 Rust tests, including 11 OCR tests), Chromium/WebKit interaction checks and
+210 Rust tests, including 12 OCR tests), Chromium/WebKit interaction checks and
 1000 × 960 layout checks, real Vision revision 3 with `de-DE`/`en-US`, VFR times
 0/1120/2400/3520 ms, a real Tauri app bundle, existing ad-hoc deep signing/strict
 verification, and the bundled helper smoke with isolated cwd/PATH. Intel and
@@ -144,6 +154,12 @@ older-macOS runtime behavior remain unverified, as does an interactive native
 WebView smoke; browser checks use isolated native API fixtures. Windows/Linux
 builds were not run in this macOS environment. No notarization or release was
 performed.
+
+The edge-box fix also passed all 60 selected full-resolution frames in the first
+minute of the reported 4K video, through the real Vision helper and strict Rust
+response validation, including the former failures at 9 and 48 seconds. This
+diagnostic did not modify the personal History database or save an OCR result;
+the entry needs a new **Check for OCR** run in the updated app.
 
 The dev watcher regression was checked with `npm run dev -- -- -- --version`:
 touching the generated helper after watching starts does not restart the build,

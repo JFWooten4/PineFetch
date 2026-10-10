@@ -1,0 +1,62 @@
+[
+    {
+        "name": "Vision revision 3, 4K video at 9 seconds, left edge",
+        "bounds": {
+            "x": -0.0002019815776732159,
+            "y": 0.7924342606846735,
+            "width": 0.16755512555440266,
+            "height": 0.12830977263274024
+        },
+        "visible": { "x": 0, "y": 0.7924342606846735, "width": 0.16735314397672946, "height": 0.12830977263274024 }
+    },
+    {
+        "name": "Vision revision 3, 4K video at 48 seconds, top edge",
+        "bounds": {
+            "x": 0.31028590160809666,
+            "y": 0.31833357509481697,
+            "width": 0.6619555791219075,
+            "height": 0.7325724848994503
+        },
+        "visible": {
+            "x": 0.31028590160809666,
+            "y": 0.31833357509481697,
+            "width": 0.6619555791219075,
+            "height": 0.681666424905183
+        }
+    },
+    {
+        "name": "bottom edge",
+        "bounds": { "x": 0.25, "y": -0.125, "width": 0.25, "height": 0.25 },
+        "visible": { "x": 0.25, "y": 0, "width": 0.25, "height": 0.125 }
+    },
+    {
+        "name": "right edge",
+        "bounds": { "x": 0.875, "y": 0.25, "width": 0.25, "height": 0.25 },
+        "visible": { "x": 0.875, "y": 0.25, "width": 0.125, "height": 0.25 }
+    },
+    {
+        "name": "all edges",
+        "bounds": { "x": -0.125, "y": -0.125, "width": 1.25, "height": 1.25 },
+        "visible": { "x": 0, "y": 0, "width": 1, "height": 1 }
+    },
+    {
+        "name": "entirely outside image",
+        "bounds": { "x": 2, "y": 0.25, "width": 0.25, "height": 0.25 },
+        "visible": null
+    },
+    {
+        "name": "touching edge without visible area",
+        "bounds": { "x": -0.25, "y": 0.25, "width": 0.25, "height": 0.25 },
+        "visible": null
+    },
+    {
+        "name": "empty native box",
+        "bounds": { "x": 0.25, "y": 0.25, "width": 0, "height": 0.25 },
+        "invalid": true
+    },
+    {
+        "name": "negative native size",
+        "bounds": { "x": 0.25, "y": 0.25, "width": 0.25, "height": -0.25 },
+        "invalid": true
+    }
+]

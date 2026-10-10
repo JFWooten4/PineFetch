@@ -20,11 +20,13 @@ const fixture = t => {
     for (const directory of ['scripts', 'native', 'bin']) mkdirSync(join(root, directory));
     const script = join(root, 'scripts/prepare-ocr-runtime.sh');
     const source = join(root, 'native/vision-ocr.swift');
+    const boundsSource = join(root, 'native/vision-ocr-bounds.swift');
     const helper = join(root, 'src-tauri/resources/ocr-runtime/vision-ocr-arm64');
     const stamp = `${helper}.build`;
     const calls = join(root, 'compiler-calls');
     copyFileSync(new URL('../scripts/prepare-ocr-runtime.sh', import.meta.url), script);
     writeFileSync(source, 'synthetic Swift source');
+    writeFileSync(boundsSource, 'synthetic bounds source');
     const executable = (name, body) => {
         const path = join(root, 'bin', name);
         writeFileSync(path, `#!/bin/sh\nset -eu\n${body}\n`);
@@ -67,7 +69,7 @@ const fixture = t => {
             timeout: 10000,
         });
     const compileCount = () => readFileSync(calls, 'utf8').trim().split('\n').length;
-    return { script, source, helper, stamp, run, compileCount };
+    return { script, source, boundsSource, helper, stamp, run, compileCount };
 };
 
 test('OCR builds reuse unchanged artifacts and rebuild when source or toolchain inputs change', t => {
@@ -84,10 +86,13 @@ test('OCR builds reuse unchanged artifacts and rebuild when source or toolchain 
     assert.equal(f.run().status, 0);
     assert.equal(f.compileCount(), 2);
     assert.equal(readFileSync(f.helper, 'utf8'), 'changed Swift source');
-    assert.equal(f.run({ MACOSX_DEPLOYMENT_TARGET: '12.0' }).status, 0);
+    writeFileSync(f.boundsSource, 'changed bounds source');
+    assert.equal(f.run().status, 0);
     assert.equal(f.compileCount(), 3);
-    assert.equal(f.run({ MACOSX_DEPLOYMENT_TARGET: '12.0', OCR_TEST_COMPILER: 'synthetic Swift 2' }).status, 0);
+    assert.equal(f.run({ MACOSX_DEPLOYMENT_TARGET: '12.0' }).status, 0);
     assert.equal(f.compileCount(), 4);
+    assert.equal(f.run({ MACOSX_DEPLOYMENT_TARGET: '12.0', OCR_TEST_COMPILER: 'synthetic Swift 2' }).status, 0);
+    assert.equal(f.compileCount(), 5);
 });
 
 test('failed OCR compilation or signing preserves the last build, and missing or damaged artifacts are repaired', t => {

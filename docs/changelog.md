@@ -5,6 +5,7 @@
 - search through transcriped texts
 - "Show saved videos by this creator" context menu
 - OCR analysis
+- search amount displayed in history
 
 # 2.2.2
 

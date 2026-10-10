@@ -29,8 +29,8 @@ func runVision() throws {
     request.recognitionLanguages = selected
     try emit([
         "type": "ready", "protocol_version": 1, "engine": "apple_vision",
-        "engine_version": ["vision_request_revision": request.revision, "macos_version": ProcessInfo.processInfo.operatingSystemVersionString, "helper_version": "1"],
-        "settings": ["recognition_level": "accurate", "recognition_languages": selected, "supported_languages": supported, "language_fallback": fallback, "uses_language_correction": false, "minimum_text_height": 0, "orientation": "up; FFmpeg autorotation", "coordinates": "normalized full oriented frame, bottom-left origin"]
+        "engine_version": ["vision_request_revision": request.revision, "macos_version": ProcessInfo.processInfo.operatingSystemVersionString, "helper_version": "2"],
+        "settings": ["recognition_level": "accurate", "recognition_languages": selected, "supported_languages": supported, "language_fallback": fallback, "uses_language_correction": false, "minimum_text_height": 0, "orientation": "up; FFmpeg autorotation", "coordinates": "normalized full oriented frame, bottom-left origin", "bounding_box_clipping": "intersection with normalized image rectangle"]
     ])
     while let line = readLine() {
         try autoreleasepool {
@@ -43,9 +43,9 @@ func runVision() throws {
             }
             let handler = VNImageRequestHandler(url: URL(fileURLWithPath: path), orientation: .up, options: [:])
             try handler.perform([request])
-            let observations: [[String: Any]] = (request.results ?? []).compactMap { observation in
-                guard let candidate = observation.topCandidates(1).first else { return nil }
-                let bounds = observation.boundingBox
+            let observations: [[String: Any]] = try (request.results ?? []).compactMap { observation in
+                guard let candidate = observation.topCandidates(1).first,
+                      let bounds = try visibleTextBounds(observation.boundingBox) else { return nil }
                 return ["text": candidate.string, "confidence": Double(candidate.confidence), "bounds": ["x": bounds.origin.x, "y": bounds.origin.y, "width": bounds.width, "height": bounds.height]]
             }
             try emit(["type": "frame", "frame_id": frameID, "observations": observations])

@@ -25,6 +25,45 @@ const ffprobe = process.env.PINEFETCH_FFPROBE_BIN || '/opt/homebrew/bin/ffprobe'
 const root = await mkdtemp(join(tmpdir(), 'pinefetch-native-ocr-'));
 let child;
 try {
+    // Compile the actual geometry code independently of Vision. Golden cases
+    // include native observations that previously aborted a real 4K video.
+    const geometryMain = join(root, 'main.swift');
+    await writeFile(
+        geometryMain,
+        `import Foundation
+import CoreGraphics
+let cases = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))) as! [[String: Any]]
+func rect(_ value: [String: Any]) -> CGRect {
+    func number(_ key: String) -> Double { (value[key] as! NSNumber).doubleValue }
+    return CGRect(x: number("x"), y: number("y"), width: number("width"), height: number("height"))
+}
+for test in cases {
+    let name = test["name"] as! String
+    do {
+        let visible = try visibleTextBounds(rect(test["bounds"] as! [String: Any]))
+        precondition(test["invalid"] as? Bool != true, "Accepted invalid box: " + name)
+        if let expected = test["visible"] as? [String: Any] {
+            guard let actual = visible else { fatalError("Lost visible text: " + name) }
+            let wanted = rect(expected)
+            for (a, b) in zip([actual.origin.x, actual.origin.y, actual.width, actual.height], [wanted.origin.x, wanted.origin.y, wanted.width, wanted.height]) {
+                precondition(abs(a - b) < 0.000000000001, "Wrong intersection: " + name)
+            }
+        } else { precondition(visible == nil, "Retained invisible text: " + name) }
+    } catch { precondition(test["invalid"] as? Bool == true, "Rejected valid box: " + name) }
+}
+for bad in [CGFloat.nan, CGFloat.infinity, -CGFloat.infinity] {
+    for bounds in [CGRect(x: bad, y: 0.25, width: 0.25, height: 0.25), CGRect(x: 0.25, y: bad, width: 0.25, height: 0.25), CGRect(x: 0.25, y: 0.25, width: bad, height: 0.25), CGRect(x: 0.25, y: 0.25, width: 0.25, height: bad)] {
+        do { _ = try visibleTextBounds(bounds); fatalError("Accepted non-finite box") } catch {}
+    }
+}
+`
+    );
+    await run(
+        '/usr/bin/xcrun',
+        ['swiftc', join(repository, 'native/vision-ocr-bounds.swift'), geometryMain, '-o', join(root, 'bounds-test')],
+        { timeout: 60000 }
+    );
+    await run(join(root, 'bounds-test'), [join(repository, 'test/fixtures/ocr-bounds.json')], { timeout: 10000 });
     const source = join(root, 'image.swift');
     await writeFile(
         source,
@@ -150,6 +189,8 @@ try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWi
     const ready = await read();
     assert.equal(ready.type, 'ready');
     assert.equal(ready.engine, 'apple_vision');
+    assert.equal(ready.engine_version.helper_version, '2');
+    assert.equal(ready.settings.bounding_box_clipping, 'intersection with normalized image rectangle');
     assert.equal(ready.settings.uses_language_correction, false);
     assert(
         ready.settings.recognition_languages.every(language => ready.settings.supported_languages.includes(language))
@@ -165,7 +206,16 @@ try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWi
             JSON.stringify(recognized)
         );
         assert(
-            recognized.observations.every(observation => observation.bounds.width > 0 && observation.bounds.height > 0)
+            recognized.observations.every(
+                ({ bounds }) =>
+                    [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) &&
+                    bounds.x >= 0 &&
+                    bounds.y >= 0 &&
+                    bounds.width > 0 &&
+                    bounds.height > 0 &&
+                    bounds.x + bounds.width <= 1.001 &&
+                    bounds.y + bounds.height <= 1.001
+            )
         );
     }
     child.stdin.end();
@@ -174,7 +224,7 @@ try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWi
     const dependencies = (await run('/usr/bin/otool', ['-L', localHelper])).stdout;
     assert(!dependencies.includes('/opt/homebrew/') && !dependencies.includes('/Library/Developer/'), dependencies);
     console.log(
-        `[OCR native] Vision revision ${ready.engine_version.vision_request_revision}; languages ${ready.settings.recognition_languages.join(', ')}; VFR observations ${observations.map(frame => frame.ms).join(', ')} ms; native helper passed with isolated cwd/PATH.`
+        `[OCR native] Native edge-box regressions passed; Vision revision ${ready.engine_version.vision_request_revision}; languages ${ready.settings.recognition_languages.join(', ')}; VFR observations ${observations.map(frame => frame.ms).join(', ')} ms; native helper passed with isolated cwd/PATH.`
     );
 } finally {
     if (child && child.exitCode === null) child.kill('SIGKILL');

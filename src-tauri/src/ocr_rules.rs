@@ -18,7 +18,7 @@ pub(crate) fn validate_ready(ready: &serde_json::Value) -> Result<(), String> {
         || ready["engine_version"]["macos_version"]
             .as_str()
             .is_none_or(str::is_empty)
-        || ready["engine_version"]["helper_version"].as_str() != Some("1")
+        || ready["engine_version"]["helper_version"].as_str() != Some("2")
         || settings["recognition_level"] != "accurate"
         || settings["uses_language_correction"] != false
         || languages.is_none_or(Vec::is_empty)
