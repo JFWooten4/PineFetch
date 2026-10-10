@@ -140,6 +140,13 @@ pub(crate) struct OcrTools {
     pub(crate) ffprobe: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum AnalysisProgress {
+    Prepared { duration_ms: Option<u64> },
+    Frame { count: u64, observed_at_ms: u64 },
+    Finishing { count: u64 },
+}
+
 pub(crate) fn start(
     db: Arc<Database>,
     state: Arc<OcrState>,
@@ -162,6 +169,9 @@ pub(crate) fn start(
         status: "running".into(),
         frames_checked: 0,
         observed_at_ms: None,
+        total_duration_ms: None,
+        total_frames: None,
+        total_frames_is_estimate: false,
         message: None,
     };
     let mut active = state.active.lock().map_err(|_| "OCR state lock poisoned")?;
@@ -181,11 +191,28 @@ pub(crate) fn start(
         .spawn(move || {
             emit(worker_progress.clone());
             let identity = fingerprint(&path);
-            let result = analyze(&worker_state, &path, &tools, |frames, time| {
+            let result = analyze(&worker_state, &path, &tools, |update| {
                 if let Ok(mut active) = worker_state.active.lock() {
                     if let Some(p) = active.as_mut().filter(|p| p.status == "running") {
-                        p.frames_checked = frames;
-                        p.observed_at_ms = Some(time);
+                        match update {
+                            AnalysisProgress::Prepared { duration_ms } => {
+                                p.total_duration_ms = duration_ms;
+                                p.total_frames = duration_ms.map(ocr_rules::estimated_frame_count);
+                                p.total_frames_is_estimate = p.total_frames.is_some();
+                            }
+                            AnalysisProgress::Frame {
+                                count,
+                                observed_at_ms,
+                            } => {
+                                p.frames_checked = count;
+                                p.observed_at_ms = Some(observed_at_ms);
+                                p.total_frames = p.total_frames.map(|total| total.max(count));
+                            }
+                            AnalysisProgress::Finishing { count } => {
+                                p.total_frames = Some(count);
+                                p.total_frames_is_estimate = false;
+                            }
+                        }
                         emit(p.clone());
                     }
                 }
@@ -589,7 +616,7 @@ pub(crate) fn analyze(
     state: &OcrState,
     path: &Path,
     tools: &OcrTools,
-    progress: impl Fn(u64, u64),
+    progress: impl Fn(AnalysisProgress),
 ) -> Result<OcrResult, String> {
     validate_source(path)?;
     let before = fingerprint(path)?;
@@ -611,7 +638,14 @@ pub(crate) fn analyze(
     ocr_rules::validate_ready(&ready)?;
     let mut probe = Command::new(&tools.ffprobe);
     probe
-        .args(["-v", "error", "-show_streams", "-of", "json"])
+        .args([
+            "-v",
+            "error",
+            "-show_streams",
+            "-show_format",
+            "-of",
+            "json",
+        ])
         .arg(path);
     let probe = process::run_command_output(
         probe,
@@ -625,6 +659,8 @@ pub(crate) fn analyze(
         return Err("The saved file could not be opened as a video.".into());
     }
     let index = ocr_rules::video_stream_index(&probe.stdout)?;
+    let duration_ms = ocr_rules::video_duration_ms(&probe.stdout, index);
+    progress(AnalysisProgress::Prepared { duration_ms });
     let workspace = Workspace::new()?;
     let frame_path = workspace.path.join("frame.png");
     let (extractor, output, errors, _) =
@@ -701,7 +737,10 @@ pub(crate) fn analyze(
         builder.push(time, observations)?;
         frame_id += 1;
         previous_time = Some(time);
-        progress(frame_id, time);
+        progress(AnalysisProgress::Frame {
+            count: frame_id,
+            observed_at_ms: time,
+        });
     }
     let extraction_result = extractor.wait();
     if extraction_result.is_err() {
@@ -732,6 +771,7 @@ pub(crate) fn analyze(
         Err(mpsc::RecvTimeoutError::Disconnected) => {}
         _ => return Err("OCR helper returned unexpected trailing output.".into()),
     }
+    progress(AnalysisProgress::Finishing { count: frame_id });
     if fingerprint(path)? != before
         || hash_source(state, path)? != hash
         || fingerprint(path)? != before
@@ -742,6 +782,7 @@ pub(crate) fn analyze(
     settings["sample_interval_seconds"] = serde_json::json!(ocr_rules::SAMPLE_INTERVAL_SECONDS);
     settings["sampling"] = serde_json::json!("first frame, then first media PTS at least one second after previous selection; local file timeline");
     settings["frames_checked"] = serde_json::json!(frame_id);
+    settings["video_duration_ms"] = serde_json::json!(duration_ms);
     // Success includes cleanup. An unexpected remaining file or filesystem
     // failure must not silently leave a successful attempt's temporary output.
     fs::remove_dir(&workspace.path)

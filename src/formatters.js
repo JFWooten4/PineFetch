@@ -20,6 +20,14 @@ const formatFileSize = bytes => {
     return `${value.toFixed(precision)} ${units[unitIndex]}`;
 };
 
+const formatMediaTime = milliseconds => {
+    const value = Number(milliseconds);
+    const seconds = Math.floor((Number.isFinite(value) ? Math.max(0, value) : 0) / 1000);
+    return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+        .map(part => String(part).padStart(2, '0'))
+        .join(':');
+};
+
 const formatHistorySource = source => {
     const name = `${source || 'unknown'}`.trim().toLowerCase();
     const known = {
@@ -52,4 +60,4 @@ const formatLocalDateTime = date => {
     });
 };
 
-export { formatDuration, formatFileSize, formatHistorySource, formatUploadDate, formatLocalDateTime };
+export { formatDuration, formatMediaTime, formatFileSize, formatHistorySource, formatUploadDate, formatLocalDateTime };

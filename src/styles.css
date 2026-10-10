@@ -585,6 +585,7 @@ body {
 }
 
 .pinefetch-history-content-toolbar .oj-muted,
+#historyOcrProgressText,
 .pinefetch-history-caption-track + .oj-button,
 .pinefetch-history-caption-track {
     margin: 0;

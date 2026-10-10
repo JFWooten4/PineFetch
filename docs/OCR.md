@@ -93,9 +93,20 @@ file is never deleted or declared stale by age; this supplements existing CLI
 startup coordination.
 
 All commands and `history:ocr` events use `tauri-client.js`. Progress carries
-History ID, attempt ID, attempt start, actual frame count and last media PTS.
-The UI uses indeterminate progress with observed counts, without guessed
-percentages or remaining times. Contents load on demand; entry/request/attempt
+History ID, attempt ID, attempt start, actual frame count, last media PTS,
+local video duration and sampled-frame total. FFprobe reads duration from the
+saved file, preferring the selected video stream and accounting for timestamp
+origins, including Matroska end-time tags. History's online duration is not used.
+The UI displays **Video time HH:MM:SS / HH:MM:SS** without milliseconds,
+**Frames checked / total**, the entry's thumbnail and a determinate bar based
+on media time divided by local video duration. The frame total initially uses
+`ceil(duration / sample interval)` and is marked **≈**, since actual sampling
+can differ with variable timestamps or gaps. Extraction's final count replaces
+the estimate. The bar stays below 100% during final source checks and saving;
+the status reads **Finishing OCR…**. Missing duration keeps the bar
+indeterminate and unknown totals are shown explicitly. Missing or failed
+thumbnails do not reserve an empty image column.
+Contents load on demand; entry/request/attempt
 guards reject late data. Subscriptions are cleaned up on page exit. OCR is
 rendered with `textContent`, including when copied with readable timestamps.
 
@@ -145,8 +156,8 @@ and runs the helper from an isolated cwd/system PATH. Its optional first argumen
 is the packaged helper path. Developer tools generate this test fixture only;
 the shipped helper does not use them. No release/publishing occurs.
 
-Verified on macOS 26.7 arm64: the complete check/build gates (43 JavaScript and
-210 Rust tests, including 12 OCR tests), Chromium/WebKit interaction checks and
+Verified on macOS 26.7 arm64: the complete check/build gates (44 JavaScript and
+211 Rust tests, including 13 OCR tests), Chromium/WebKit interaction checks and
 1000 × 960 layout checks, real Vision revision 3 with `de-DE`/`en-US`, VFR times
 0/1120/2400/3520 ms, a real Tauri app bundle, existing ad-hoc deep signing/strict
 verification, and the bundled helper smoke with isolated cwd/PATH. Intel and

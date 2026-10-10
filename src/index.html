@@ -779,21 +779,29 @@
                                     Not checked yet
                                 </p>
                                 <p id="historyOcrNotice" class="oj-helper" hidden></p>
-                                <progress
-                                    id="historyOcrProgress"
-                                    class="oj-progress"
-                                    aria-label="OCR processing"
-                                    hidden
-                                ></progress>
-                                <p id="historyOcrProgressText" class="oj-muted"></p>
-                                <button
-                                    id="historyOcrCancelBtn"
-                                    class="oj-button oj-button-secondary"
-                                    type="button"
-                                    hidden
-                                >
-                                    Cancel
-                                </button>
+                                <div id="historyOcrAnalysis" class="pinefetch-list-card-layout" hidden>
+                                    <div class="pinefetch-panel-heading">
+                                        <progress
+                                            id="historyOcrProgress"
+                                            class="oj-progress"
+                                            aria-label="OCR processing"
+                                            aria-describedby="historyOcrProgressText"
+                                            hidden
+                                        ></progress>
+                                        <p id="historyOcrProgressText" class="oj-muted"></p>
+                                        <div>
+                                            <button
+                                                id="historyOcrCancelBtn"
+                                                class="oj-button oj-button-secondary"
+                                                type="button"
+                                                hidden
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <img id="historyOcrThumbnail" class="pinefetch-media-thumbnail" alt="" hidden />
+                                </div>
                                 <p id="historyOcrSamplingNotice" class="oj-helper" hidden>
                                     Times are observations from sampled frames in the local video, not exact text
                                     display intervals.

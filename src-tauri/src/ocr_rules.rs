@@ -193,6 +193,77 @@ pub(crate) fn video_stream_index(bytes: &[u8]) -> Result<u64, String> {
         .ok_or_else(|| "The saved file has no usable video track. Audio and transcript files cannot be checked for OCR.".into())
 }
 
+// Use the local file's duration, including cuts; remote History metadata may
+// describe a different timeline. Missing/invalid duration leaves progress open.
+pub(crate) fn video_duration_ms(bytes: &[u8], index: u64) -> Option<u64> {
+    let probe: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let parse = |value: &serde_json::Value| {
+        let seconds = value
+            .as_f64()
+            .or_else(|| value.as_str()?.parse::<f64>().ok())?;
+        seconds.is_finite().then_some(seconds)
+    };
+    let origin = probe
+        .pointer("/format/start_time")
+        .and_then(parse)
+        .unwrap_or(0.0);
+    let stream = probe["streams"].as_array().and_then(|streams| {
+        streams
+            .iter()
+            .find(|stream| stream["index"].as_u64() == Some(index))
+    });
+    let seconds = stream
+        .and_then(|stream| {
+            let offset =
+                (stream.get("start_time").and_then(parse).unwrap_or(origin) - origin).max(0.0);
+            stream
+                .get("duration")
+                .and_then(parse)
+                .filter(|v| *v > 0.0)
+                .map(|v| v + offset)
+        })
+        // Matroska DURATION tags contain an end timestamp, including the
+        // original offset. FFmpeg -start_at_zero removes that same origin.
+        .or_else(|| {
+            let tags = stream?.get("tags")?;
+            let tag = tags
+                .get("DURATION")
+                .or_else(|| tags.get("duration"))?
+                .as_str()?;
+            let parts: Vec<_> = tag.split(':').collect();
+            if parts.len() != 3 {
+                return None;
+            }
+            let hours = parts[0].parse::<u64>().ok()?;
+            let minutes = parts[1].parse::<u32>().ok()?;
+            let seconds = parts[2].parse::<f64>().ok()?;
+            if minutes >= 60 || !(0.0..60.0).contains(&seconds) {
+                return None;
+            }
+            let duration = hours as f64 * 3600.0 + minutes as f64 * 60.0 + seconds - origin;
+            (duration > 0.0).then_some(duration)
+        })
+        .or_else(|| {
+            let mut duration = probe.pointer("/format/duration").and_then(parse)?;
+            let matroska = probe
+                .pointer("/format/format_name")
+                .and_then(|v| v.as_str())
+                .is_some_and(|formats| {
+                    formats.split(',').any(|f| matches!(f, "matroska" | "webm"))
+                });
+            if matroska {
+                duration -= origin;
+            }
+            Some(duration)
+        })?;
+    let millis = seconds * 1000.0;
+    (millis.is_finite() && millis >= 1.0 && millis < u64::MAX as f64).then(|| millis.round() as u64)
+}
+
+pub(crate) fn estimated_frame_count(duration_ms: u64) -> u64 {
+    ((duration_ms as f64 / (SAMPLE_INTERVAL_SECONDS * 1000.0)).ceil() as u64).max(1)
+}
+
 pub(crate) fn timestamp(ms: u64) -> String {
     format!(
         "{:02}:{:02}:{:02}.{:03}",

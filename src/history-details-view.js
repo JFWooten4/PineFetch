@@ -302,6 +302,7 @@ export const createHistoryDetailsView = ({
             }
 
             state.details = details;
+            ocrView.setEntry(details.entry);
             const title = details.entry?.title || details.entry?.filename || 'History entry';
             els.historyDetailsSubtitle.textContent = title;
             els.historyDetailsStatus.textContent = '';

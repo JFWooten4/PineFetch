@@ -129,6 +129,8 @@ const els = Object.seal({
     historyOcrStatus: document.getElementById('historyOcrStatus'),
     historyOcrNotice: document.getElementById('historyOcrNotice'),
     historyOcrProgress: document.getElementById('historyOcrProgress'),
+    historyOcrAnalysis: document.getElementById('historyOcrAnalysis'),
+    historyOcrThumbnail: document.getElementById('historyOcrThumbnail'),
     historyOcrProgressText: document.getElementById('historyOcrProgressText'),
     historyOcrCancelBtn: document.getElementById('historyOcrCancelBtn'),
     historyOcrCopyBtn: document.getElementById('historyOcrCopyBtn'),

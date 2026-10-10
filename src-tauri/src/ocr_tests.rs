@@ -51,6 +51,9 @@ fn progress(attempt: &str) -> OcrProgress {
         status: "running".into(),
         frames_checked: 0,
         observed_at_ms: None,
+        total_duration_ms: None,
+        total_frames: None,
+        total_frames_is_estimate: false,
         message: None,
     }
 }
@@ -119,6 +122,38 @@ fn vision_edge_boxes_are_clipped_before_strict_protocol_validation() {
             serde_json::from_value::<OcrBox>(bounds.clone()).unwrap()
         );
     }
+}
+
+#[test]
+fn local_video_duration_and_sample_estimates_handle_unknown_metadata() {
+    let local_cut = br#"{"format":{"duration":"3.521"},"streams":[{"index":0}]}"#;
+    assert_eq!(ocr_rules::video_duration_ms(local_cut, 0), Some(3521));
+    assert_eq!(ocr_rules::estimated_frame_count(3521), 4);
+    assert_eq!(ocr_rules::estimated_frame_count(1000), 1);
+    assert_eq!(ocr_rules::estimated_frame_count(1001), 2);
+    let stream_only = br#"{"format":{"duration":"N/A"},"streams":[{"index":0,"duration":"9"},{"index":2,"duration":1.31}]}"#;
+    assert_eq!(ocr_rules::video_duration_ms(stream_only, 2), Some(1310));
+    assert_eq!(ocr_rules::video_duration_ms(stream_only, 1), None);
+    // Real FFprobe shapes from two-second files shifted five seconds forward.
+    let matroska = br#"{"format":{"format_name":"matroska,webm","duration":"7.0","start_time":"5.0"},"streams":[{"index":0,"start_time":"5.0","tags":{"DURATION":"00:00:07.000000000"}}]}"#;
+    assert_eq!(ocr_rules::video_duration_ms(matroska, 0), Some(2000));
+    let matroska_without_tags = br#"{"format":{"format_name":"matroska,webm","duration":"7.0","start_time":"5.0"},"streams":[{"index":0}]}"#;
+    assert_eq!(
+        ocr_rules::video_duration_ms(matroska_without_tags, 0),
+        Some(2000)
+    );
+    let mp4 = br#"{"format":{"format_name":"mov,mp4","duration":"2.0","start_time":"5.0"},"streams":[{"index":0,"duration":"2.0","start_time":"5.0"}]}"#;
+    assert_eq!(ocr_rules::video_duration_ms(mp4, 0), Some(2000));
+    let ts = br#"{"format":{"format_name":"mpegts","duration":"2.0","start_time":"6.4"},"streams":[{"index":0,"duration":"2.0","start_time":"6.4"}]}"#;
+    assert_eq!(ocr_rules::video_duration_ms(ts, 0), Some(2000));
+    let delayed_video = br#"{"format":{"duration":"2.0","start_time":"5.0"},"streams":[{"index":0,"duration":"1.0","start_time":"5.5"}]}"#;
+    assert_eq!(ocr_rules::video_duration_ms(delayed_video, 0), Some(1500));
+    for duration in ["N/A", "NaN", "inf", "-1", "0", "1e300"] {
+        let probe = serde_json::json!({"format":{"duration":duration}}).to_string();
+        assert_eq!(ocr_rules::video_duration_ms(probe.as_bytes(), 0), None);
+    }
+    assert_eq!(ocr_rules::video_duration_ms(b"not json", 0), None);
+    assert_eq!(ocr_rules::video_duration_ms(b"{}", 0), None);
 }
 
 #[test]
@@ -415,7 +450,7 @@ fn tools(root: &TempRoot, helper_body: &str) -> OcrTools {
     )
     .unwrap();
     OcrTools { helper:script(root,"vision",helper_body),
-        ffprobe:script(root,"probe",r#"printf '%s\n' '{"streams":[{"index":0,"codec_type":"video","width":100,"height":100}]}'"#),
+        ffprobe:script(root,"probe",r#"printf '%s\n' '{"format":{"duration":"3.5"},"streams":[{"index":0,"codec_type":"video","width":100,"height":100}]}'"#),
         ffmpeg:script(root,"frames",&format!("printf '%s\\n' '[Parsed_showinfo_1 @ fixture] n: 0 pts: 1 pts_time:1.31 fmt:rgba' >&2\ncat '{}'",png.display())) }
 }
 #[cfg(unix)]
@@ -430,27 +465,55 @@ fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_
     let path = root.path("saved.mp4");
     fs::write(&path, b"synthetic video").unwrap();
     let good = format!("{READY}\nread -r request\n{FRAME}\nwhile read -r request; do :; done");
-    let result =
-        ocr::analyze(&OcrState::default(), &path, &tools(&root, &good), |_, _| {}).unwrap();
+    let updates = std::cell::RefCell::new(Vec::new());
+    let result = ocr::analyze(
+        &OcrState::default(),
+        &path,
+        &tools(&root, &good),
+        |update| {
+            updates.borrow_mut().push(update);
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        *updates.borrow(),
+        vec![
+            ocr::AnalysisProgress::Prepared {
+                duration_ms: Some(3500)
+            },
+            ocr::AnalysisProgress::Frame {
+                count: 1,
+                observed_at_ms: 1310
+            },
+            ocr::AnalysisProgress::Finishing { count: 1 },
+        ]
+    );
+    let settings: serde_json::Value = serde_json::from_str(&result.settings_json).unwrap();
+    assert_eq!(settings["video_duration_ms"], 3500);
     assert_eq!(result.segments[0].observed_at_ms, vec![1310]);
     assert_eq!(
         result.source_sha256,
         crate::hashing::sha256_hex(b"synthetic video")
     );
-    assert!(
-        ocr::analyze(&OcrState::default(), &path, &tools(&root, &good), |_, _| {
-            fs::write(&path, b"changed source").unwrap();
-        })
-        .unwrap_err()
-        .contains("changed during OCR")
-    );
+    assert!(ocr::analyze(
+        &OcrState::default(),
+        &path,
+        &tools(&root, &good),
+        |update| {
+            if matches!(update, ocr::AnalysisProgress::Frame { .. }) {
+                fs::write(&path, b"changed source").unwrap();
+            }
+        }
+    )
+    .unwrap_err()
+    .contains("changed during OCR"));
     for bad in [
         "printf 'not json\\n'".to_string(),
         format!("{READY}\nread -r request\nprintf '{{}}\\n'"),
         format!("{READY}\nexit 0"),
         format!("{READY}\nread -r request\n{FRAME}\nexit 23"),
     ] {
-        assert!(ocr::analyze(&OcrState::default(), &path, &tools(&root, &bad), |_, _| {}).is_err());
+        assert!(ocr::analyze(&OcrState::default(), &path, &tools(&root, &bad), |_| {}).is_err());
     }
     let mut oversized_log = tools(&root, &good);
     oversized_log.ffmpeg = script(
@@ -460,7 +523,7 @@ fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_
     );
     let started = Instant::now();
     assert!(
-        ocr::analyze(&OcrState::default(), &path, &oversized_log, |_, _| {})
+        ocr::analyze(&OcrState::default(), &path, &oversized_log, |_| {})
             .unwrap_err()
             .contains("oversized FFmpeg diagnostic")
     );
@@ -473,7 +536,7 @@ fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_
         "audio-probe",
         r#"printf '%s\n' '{"streams":[{"index":0,"codec_type":"audio"}]}'"#,
     );
-    assert!(ocr::analyze(&OcrState::default(), &path, &audio, |_, _| {})
+    assert!(ocr::analyze(&OcrState::default(), &path, &audio, |_| {})
         .unwrap_err()
         .contains("no usable video"));
 }

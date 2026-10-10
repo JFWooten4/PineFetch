@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatDuration, formatFileSize, formatHistorySource, formatUploadDate } from '../src/formatters.js';
+import {
+    formatDuration,
+    formatMediaTime,
+    formatFileSize,
+    formatHistorySource,
+    formatUploadDate,
+} from '../src/formatters.js';
 
 test('shared duration labels preserve missing, zero, minute and hour displays', () => {
     for (const [input, expected] of [
@@ -32,6 +38,24 @@ test('shared file sizes retain binary units and the existing display precision',
         [1024 ** 4, '1.00 TB'],
     ]) {
         assert.equal(formatFileSize(input), expected);
+    }
+});
+
+test('video progress times use whole seconds and preserve hours', () => {
+    for (const [input, expected] of [
+        [null, '00:00:00'],
+        [-1, '00:00:00'],
+        [NaN, '00:00:00'],
+        [Infinity, '00:00:00'],
+        [999, '00:00:00'],
+        [3020, '00:00:03'],
+        [59999, '00:00:59'],
+        [60000, '00:01:00'],
+        [740000, '00:12:20'],
+        [1305621, '00:21:45'],
+        [7261999, '02:01:01'],
+    ]) {
+        assert.equal(formatMediaTime(input), expected);
     }
 });
 

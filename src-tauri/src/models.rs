@@ -439,6 +439,9 @@ pub(crate) struct OcrProgress {
     pub(crate) status: String,
     pub(crate) frames_checked: u64,
     pub(crate) observed_at_ms: Option<u64>,
+    pub(crate) total_duration_ms: Option<u64>,
+    pub(crate) total_frames: Option<u64>,
+    pub(crate) total_frames_is_estimate: bool,
     pub(crate) message: Option<String>,
 }
 
