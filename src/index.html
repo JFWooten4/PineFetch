@@ -52,6 +52,7 @@
                             <h2 class="oj-heading-3" id="leftPanelTitle">Download</h2>
                         </div>
                         <span class="oj-badge" id="infoBadge">Idle</span>
+                        <span class="oj-badge" id="historyResultCount" role="status" aria-live="polite" hidden></span>
                     </div>
 
                     <div id="downloadView" class="pinefetch-panel-view oj-stack">
@@ -651,6 +652,9 @@
                 <button id="historyShowCreatorVideosBtn" class="oj-menu-item" type="button" role="menuitem">
                     Show saved videos by this creator
                 </button>
+                <button id="historyCheckOcrBtn" class="oj-menu-item" type="button" role="menuitem">
+                    Check for OCR
+                </button>
             </div>
 
             <dialog
@@ -729,6 +733,16 @@
                                 >
                                     Captions
                                 </button>
+                                <button
+                                    id="historyOcrTab"
+                                    class="oj-tab"
+                                    type="button"
+                                    role="tab"
+                                    aria-selected="false"
+                                    aria-controls="historyOcrPanel"
+                                >
+                                    OCR text
+                                </button>
                             </div>
 
                             <section
@@ -741,6 +755,55 @@
                                     id="historyOverviewList"
                                     class="oj-definition-list pinefetch-history-overview-list"
                                 ></dl>
+                            </section>
+
+                            <section
+                                id="historyOcrPanel"
+                                class="oj-tab-panel pinefetch-history-details-panel"
+                                role="tabpanel"
+                                aria-labelledby="historyOcrTab"
+                                hidden
+                            >
+                                <div class="pinefetch-history-content-toolbar">
+                                    <p id="historyOcrMeta" class="oj-muted"></p>
+                                    <button
+                                        id="historyOcrCopyBtn"
+                                        class="oj-button oj-button-ghost"
+                                        type="button"
+                                        disabled
+                                    >
+                                        Copy text
+                                    </button>
+                                </div>
+                                <p id="historyOcrStatus" class="oj-status" role="status" aria-live="polite">
+                                    Not checked yet
+                                </p>
+                                <p id="historyOcrNotice" class="oj-helper" hidden></p>
+                                <progress
+                                    id="historyOcrProgress"
+                                    class="oj-progress"
+                                    aria-label="OCR processing"
+                                    hidden
+                                ></progress>
+                                <p id="historyOcrProgressText" class="oj-muted"></p>
+                                <button
+                                    id="historyOcrCancelBtn"
+                                    class="oj-button oj-button-secondary"
+                                    type="button"
+                                    hidden
+                                >
+                                    Cancel
+                                </button>
+                                <p id="historyOcrSamplingNotice" class="oj-helper" hidden>
+                                    Times are observations from sampled frames in the local video, not exact text
+                                    display intervals.
+                                </p>
+                                <pre
+                                    id="historyOcrText"
+                                    class="oj-code-block pinefetch-history-text-viewer"
+                                    tabindex="0"
+                                    hidden
+                                ></pre>
                             </section>
 
                             <section

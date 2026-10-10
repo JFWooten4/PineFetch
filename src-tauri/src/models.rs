@@ -204,6 +204,7 @@ pub(crate) struct HistoryEntry {
 pub(crate) struct HistoryPage {
     pub(crate) entries: Vec<HistoryEntry>,
     pub(crate) has_more: bool,
+    pub(crate) total_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -428,4 +429,40 @@ impl DownloadStateEvent {
             self.error = Some(error);
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct OcrProgress {
+    pub(crate) history_id: String,
+    pub(crate) attempt_id: String,
+    pub(crate) attempt_at: u64,
+    pub(crate) status: String,
+    pub(crate) frames_checked: u64,
+    pub(crate) observed_at_ms: Option<u64>,
+    pub(crate) message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct OcrContent {
+    pub(crate) history_entry_id: String,
+    pub(crate) text: Option<String>,
+    pub(crate) segments: Option<Vec<crate::ocr_rules::OcrSegment>>,
+    pub(crate) source_sha256: Option<String>,
+    pub(crate) engine: Option<String>,
+    pub(crate) engine_version: Option<String>,
+    pub(crate) settings_json: Option<String>,
+    pub(crate) result_created_at: Option<u64>,
+    pub(crate) last_attempt_id: String,
+    pub(crate) last_attempt_status: String,
+    pub(crate) last_attempt_at: u64,
+    pub(crate) last_error: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct OcrResult {
+    pub(crate) text: String,
+    pub(crate) segments: Vec<crate::ocr_rules::OcrSegment>,
+    pub(crate) source_sha256: String,
+    pub(crate) engine_version: String,
+    pub(crate) settings_json: String,
 }

@@ -1,0 +1,515 @@
+//! OCR-specific rule, storage, migration and isolated process regressions.
+use crate::database::{self, Database, MigrationPoint};
+use crate::models::{OcrProgress, OcrResult};
+use crate::ocr::{self, OcrState, OcrTools};
+use crate::ocr_rules::{self, Observation, OcrBox, SegmentBuilder};
+use crate::ocr_store;
+use crate::test_support::TempRoot;
+use rusqlite::Connection;
+use std::fs;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+fn db() -> Database {
+    let conn = Connection::open_in_memory().unwrap();
+    database::initialize(&conn).unwrap();
+    conn.execute("INSERT INTO history_entries (id,url,created_at) VALUES ('video','https://example.com/video',1)", []).unwrap();
+    Database::new(conn)
+}
+fn result(text: &str) -> OcrResult {
+    let mut builder = SegmentBuilder::default();
+    if !text.is_empty() {
+        builder.push(3020, vec![observation(text, 0.1)]).unwrap();
+    }
+    OcrResult {
+        text: ocr_rules::readable_text(&builder.segments),
+        segments: builder.segments,
+        source_sha256: "a".repeat(64),
+        engine_version:
+            r#"{"vision_request_revision":3,"macos_version":"synthetic","helper_version":"1"}"#
+                .into(),
+        settings_json: "{}".into(),
+    }
+}
+fn observation(text: &str, x: f64) -> Observation {
+    Observation {
+        text: text.into(),
+        bounds: OcrBox {
+            x,
+            y: 0.1,
+            width: 0.2,
+            height: 0.1,
+        },
+        confidence: 0.9,
+    }
+}
+fn progress(attempt: &str) -> OcrProgress {
+    OcrProgress {
+        history_id: "video".into(),
+        attempt_id: attempt.into(),
+        attempt_at: 1,
+        status: "running".into(),
+        frames_checked: 0,
+        observed_at_ms: None,
+        message: None,
+    }
+}
+
+#[test]
+fn grouping_preserves_positions_reappearances_numbers_and_single_frames() {
+    let mut builder = SegmentBuilder::default();
+    builder
+        .push(
+            3020,
+            vec![
+                observation("12  Kilometer", 0.1),
+                observation("12 Kilometer", 0.6),
+            ],
+        )
+        .unwrap();
+    builder
+        .push(
+            4030,
+            vec![
+                observation("12 Kilometer", 0.1),
+                observation("13 Kilometer", 0.6),
+            ],
+        )
+        .unwrap();
+    builder.push(5040, vec![]).unwrap();
+    builder
+        .push(
+            6100,
+            vec![
+                observation("12 Kilometer", 0.1),
+                observation("not 12 Kilometer!", 0.6),
+            ],
+        )
+        .unwrap();
+    assert_eq!(builder.segments.len(), 5);
+    assert_eq!(builder.segments[0].observed_at_ms, vec![3020, 4030]);
+    assert_eq!(builder.segments[1].observed_at_ms, vec![3020]);
+    assert_eq!(builder.segments[2].text, "13 Kilometer");
+    assert_eq!(builder.segments[3].observed_at_ms, vec![6100]);
+    assert!(ocr_rules::readable_text(&builder.segments)
+        .contains("[00:00:03.020, 00:00:04.030] 12 Kilometer"));
+}
+
+#[test]
+fn variable_frame_times_and_invalid_protocol_data_are_explicit() {
+    let ready = serde_json::json!({"type":"ready","protocol_version":1,"engine":"apple_vision",
+        "engine_version":{"helper_version":"1","vision_request_revision":3,"macos_version":"synthetic"},
+        "settings":{"recognition_level":"accurate","uses_language_correction":false,"recognition_languages":["en-US"],"supported_languages":["en-US"]}});
+    ocr_rules::validate_ready(&ready).unwrap();
+    let mut unsupported = ready.clone();
+    unsupported["settings"]["recognition_languages"] = serde_json::json!(["unsupported"]);
+    assert!(ocr_rules::validate_ready(&unsupported).is_err());
+    for (number, time) in [(0, "0.12"), (1, "1.31"), (2, "2.92")] {
+        assert_eq!(
+            ocr_rules::parse_frame_time(&format!(
+                "[Parsed_showinfo_1 @ x] n: {number} pts: 1 pts_time:{time} fmt:rgba"
+            ))
+            .unwrap(),
+            Some((
+                number,
+                (time.parse::<f64>().unwrap() * 1000.0).round() as u64
+            ))
+        );
+    }
+    for time in ["N/A", "NaN", "-1", "inf"] {
+        assert!(
+            ocr_rules::parse_frame_time(&format!("[Parsed_showinfo_1] n: 0 pts_time:{time}"))
+                .is_err()
+        );
+    }
+    assert!(ocr_rules::parse_frame_time("unrelated FFmpeg diagnostic")
+        .unwrap()
+        .is_none());
+    let valid = serde_json::json!({"type":"frame","frame_id":4,"observations":[{"text":"@name / 12!","confidence":0.8,"bounds":{"x":0.1,"y":0.2,"width":0.3,"height":0.1}}]});
+    assert_eq!(
+        ocr_rules::validate_observations(&valid, 4).unwrap()[0].text,
+        "@name / 12!"
+    );
+    assert!(ocr_rules::validate_observations(&valid, 5).is_err());
+    let mut invalid = valid.clone();
+    invalid["observations"][0]["bounds"]["x"] = serde_json::json!(2);
+    assert!(ocr_rules::validate_observations(&invalid, 4).is_err());
+    assert!(ocr_rules::validate_observations(&serde_json::json!({"frame_id":4}), 4).is_err());
+    let probe = br#"{"streams":[{"index":0,"codec_type":"audio"},{"index":1,"codec_type":"video","width":200,"height":100,"disposition":{"attached_pic":1}},{"index":2,"codec_type":"video","width":200,"height":100}]}"#;
+    assert_eq!(ocr_rules::video_stream_index(probe).unwrap(), 2);
+    assert!(
+        ocr_rules::video_stream_index(br#"{"streams":[{"index":0,"codec_type":"audio"}]}"#)
+            .is_err()
+    );
+}
+
+#[test]
+fn successful_and_empty_results_have_durable_metadata() {
+    let db = db();
+    ocr_store::begin(&db, "video", "first").unwrap();
+    let initial = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert!(initial.result_created_at.is_none());
+    assert!(initial.text.is_none());
+    ocr_store::finish(
+        &db,
+        "video",
+        "first",
+        &result("Text <b> remains plain text"),
+    )
+    .unwrap();
+    let saved = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(saved.engine.as_deref(), Some("apple_vision"));
+    assert_eq!(saved.source_sha256, Some("a".repeat(64)));
+    assert!(saved.result_created_at.is_some());
+    ocr_store::begin(&db, "video", "empty").unwrap();
+    ocr_store::finish(&db, "video", "empty", &result("")).unwrap();
+    let empty = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(empty.text.as_deref(), Some(""));
+    assert_eq!(empty.segments, Some(vec![]));
+    assert!(empty.result_created_at.is_some());
+    assert_eq!(empty.last_attempt_status, "completed");
+}
+
+#[test]
+fn failed_cancelled_and_stale_attempts_preserve_the_previous_result() {
+    let db = db();
+    ocr_store::begin(&db, "video", "good").unwrap();
+    ocr_store::finish(&db, "video", "good", &result("Previous")).unwrap();
+    let saved = ocr_store::get(&db, "video").unwrap().unwrap();
+    for status in ["error", "cancelled", "interrupted"] {
+        ocr_store::begin(&db, "video", status).unwrap();
+        assert!(ocr_store::finish(&db, "video", "good", &result("Stale")).is_err());
+        ocr_store::fail(&db, "video", status, status, "synthetic failure").unwrap();
+        assert!(ocr_store::finish(&db, "video", status, &result("Too late")).is_err());
+        let current = ocr_store::get(&db, "video").unwrap().unwrap();
+        assert_eq!(current.text, saved.text);
+        assert_eq!(current.result_created_at, saved.result_created_at);
+        assert_eq!(current.last_attempt_status, status);
+    }
+}
+
+#[test]
+fn cancellation_before_final_commit_and_storage_failure_cannot_report_success() {
+    let db = db();
+    ocr_store::begin(&db, "video", "old").unwrap();
+    ocr_store::finish(&db, "video", "old", &result("Old")).unwrap();
+    let state = OcrState::default();
+    ocr_store::begin(&db, "video", "cancel").unwrap();
+    ocr::test_active(&state, progress("cancel"));
+    state.cancel(&db, "video", "cancel").unwrap();
+    assert_eq!(
+        ocr::finalize(&db, &state, Ok(result("New")), || Ok(()))
+            .unwrap()
+            .status,
+        "cancelled"
+    );
+    assert!(ocr_store::get(&db, "video")
+        .unwrap()
+        .unwrap()
+        .text
+        .unwrap()
+        .ends_with("Old"));
+    let state = OcrState::default();
+    ocr_store::begin(&db, "video", "disk").unwrap();
+    ocr::test_active(&state, progress("disk"));
+    db.lock().unwrap().execute_batch("CREATE TRIGGER fail_ocr BEFORE UPDATE OF text ON history_ocr BEGIN SELECT RAISE(ABORT,'synthetic disk failure'); END;").unwrap();
+    let event = ocr::finalize(&db, &state, Ok(result("New")), || Ok(())).unwrap();
+    assert_eq!(event.status, "error");
+    assert!(event.message.unwrap().contains("synthetic disk failure"));
+    assert!(ocr_store::get(&db, "video")
+        .unwrap()
+        .unwrap()
+        .text
+        .unwrap()
+        .ends_with("Old"));
+}
+
+#[test]
+fn deletion_and_changed_source_before_commit_do_not_restore_or_replace_results() {
+    let db = db();
+    let state = OcrState::default();
+    ocr_store::begin(&db, "video", "changed").unwrap();
+    ocr::test_active(&state, progress("changed"));
+    assert_eq!(
+        ocr::finalize(&db, &state, Ok(result("Wrong file")), || Err(
+            "source replaced".into()
+        ))
+        .unwrap()
+        .status,
+        "error"
+    );
+    assert!(ocr_store::get(&db, "video")
+        .unwrap()
+        .unwrap()
+        .text
+        .is_none());
+    ocr_store::begin(&db, "video", "deleted").unwrap();
+    db.lock()
+        .unwrap()
+        .execute("DELETE FROM history_entries WHERE id='video'", [])
+        .unwrap();
+    assert!(ocr_store::finish(&db, "video", "deleted", &result("Late")).is_err());
+    assert!(ocr_store::get(&db, "video").unwrap().is_none());
+    assert!(ocr_store::begin(&db, "video", "resurrect").is_err());
+}
+
+#[test]
+fn integration_schema_two_upgrade_failure_rolls_back_and_retry_preserves_rows() {
+    let root = TempRoot::new("ocr-migration");
+    let path = root.path("state.sqlite");
+    let conn = database::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE history_ocr; PRAGMA user_version=2;
+        INSERT INTO history_entries (id,url,title,created_at) VALUES ('video','https://example.com','Grüße 🌲',123);").unwrap();
+    let before: Vec<u8> = fs::read(&path).unwrap();
+    drop(conn);
+    assert!(
+        database::open_with_hook(&path, |point| if point == MigrationPoint::Ocr {
+            Err("synthetic migration failure".into())
+        } else {
+            Ok(())
+        })
+        .is_err()
+    );
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='history_ocr'",
+            [],
+            |r| r.get::<_, u64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(conn);
+    assert_eq!(fs::read(&path).unwrap(), before);
+    let conn = database::open(&path).unwrap();
+    assert_eq!(
+        conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT title,created_at FROM history_entries WHERE id='video'",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        )
+        .unwrap(),
+        ("Grüße 🌲".into(), 123)
+    );
+    drop(conn);
+    database::open(&path).unwrap();
+}
+
+#[test]
+fn integration_strict_ocr_layout_refuses_changed_constraints_and_future_versions() {
+    let root = TempRoot::new("ocr-layout");
+    let path = root.path("state.sqlite");
+    let conn = database::open(&path).unwrap();
+    let original: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name='history_ocr'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    conn.execute_batch("DROP TABLE history_ocr;").unwrap();
+    drop(conn);
+    assert!(database::open(&path)
+        .unwrap_err()
+        .contains("missing history_ocr"));
+    let conn = Connection::open(&path).unwrap();
+    let without_constraint = original.replace(" CHECK (last_attempt_status IN ('running', 'completed', 'error', 'cancelled', 'interrupted'))", "");
+    assert_ne!(without_constraint, original);
+    conn.execute_batch(&without_constraint).unwrap();
+    drop(conn);
+    assert!(database::open(&path)
+        .unwrap_err()
+        .contains("OCR attempt status constraint"));
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE history_ocr").unwrap();
+    conn.execute_batch(&original).unwrap();
+    conn.pragma_update(None, "user_version", 4).unwrap();
+    drop(conn);
+    let bytes = fs::read(&path).unwrap();
+    assert!(database::open(&path)
+        .unwrap_err()
+        .contains("schema version 4"));
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn integration_instance_ownership_only_interrupts_orphans_after_the_owner_stops() {
+    let root = TempRoot::new("ocr-owner");
+    let db = db();
+    let first = OcrState::initialize(root.root(), &db).unwrap();
+    ocr_store::begin(&db, "video", "live").unwrap();
+    let second = OcrState::initialize(root.root(), &db).unwrap();
+    assert_eq!(
+        ocr_store::get(&db, "video")
+            .unwrap()
+            .unwrap()
+            .last_attempt_status,
+        "running"
+    );
+    drop(second);
+    drop(first);
+    let _third = OcrState::initialize(root.root(), &db).unwrap();
+    assert_eq!(
+        ocr_store::get(&db, "video")
+            .unwrap()
+            .unwrap()
+            .last_attempt_status,
+        "interrupted"
+    );
+}
+
+#[cfg(unix)]
+fn script(root: &TempRoot, name: &str, body: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = root.path(name);
+    fs::write(&path, format!("#!/bin/sh\nset -eu\n{body}\n")).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    path
+}
+#[cfg(unix)]
+fn tools(root: &TempRoot, helper_body: &str) -> OcrTools {
+    let png = root.path("frame.png");
+    fs::write(
+        &png,
+        [
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0, 73, 69, 78, 68, 0, 0, 0, 0,
+        ],
+    )
+    .unwrap();
+    OcrTools { helper:script(root,"vision",helper_body),
+        ffprobe:script(root,"probe",r#"printf '%s\n' '{"streams":[{"index":0,"codec_type":"video","width":100,"height":100}]}'"#),
+        ffmpeg:script(root,"frames",&format!("printf '%s\\n' '[Parsed_showinfo_1 @ fixture] n: 0 pts: 1 pts_time:1.31 fmt:rgba' >&2\ncat '{}'",png.display())) }
+}
+#[cfg(unix)]
+const READY: &str = r#"printf '%s\n' '{"type":"ready","protocol_version":1,"engine":"apple_vision","engine_version":{"helper_version":"1","vision_request_revision":3,"macos_version":"synthetic"},"settings":{"recognition_level":"accurate","uses_language_correction":false,"recognition_languages":["en-US"],"supported_languages":["en-US"]}}'"#;
+#[cfg(unix)]
+const FRAME: &str = r#"printf '%s\n' '{"type":"frame","frame_id":0,"observations":[{"text":"12 new paths","confidence":0.9,"bounds":{"x":0.1,"y":0.1,"width":0.2,"height":0.1}}]}'"#;
+
+#[cfg(unix)]
+#[test]
+fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_exit() {
+    let root = TempRoot::new("ocr-protocol");
+    let path = root.path("saved.mp4");
+    fs::write(&path, b"synthetic video").unwrap();
+    let good = format!("{READY}\nread -r request\n{FRAME}\nwhile read -r request; do :; done");
+    let result =
+        ocr::analyze(&OcrState::default(), &path, &tools(&root, &good), |_, _| {}).unwrap();
+    assert_eq!(result.segments[0].observed_at_ms, vec![1310]);
+    assert_eq!(
+        result.source_sha256,
+        crate::hashing::sha256_hex(b"synthetic video")
+    );
+    assert!(
+        ocr::analyze(&OcrState::default(), &path, &tools(&root, &good), |_, _| {
+            fs::write(&path, b"changed source").unwrap();
+        })
+        .unwrap_err()
+        .contains("changed during OCR")
+    );
+    for bad in [
+        "printf 'not json\\n'".to_string(),
+        format!("{READY}\nread -r request\nprintf '{{}}\\n'"),
+        format!("{READY}\nexit 0"),
+        format!("{READY}\nread -r request\n{FRAME}\nexit 23"),
+    ] {
+        assert!(ocr::analyze(&OcrState::default(), &path, &tools(&root, &bad), |_, _| {}).is_err());
+    }
+    let mut oversized_log = tools(&root, &good);
+    oversized_log.ffmpeg = script(
+        &root,
+        "oversized-frame-log",
+        "printf '%065540d\\n' 0 >&2\nsleep 30",
+    );
+    let started = Instant::now();
+    assert!(
+        ocr::analyze(&OcrState::default(), &path, &oversized_log, |_, _| {})
+            .unwrap_err()
+            .contains("oversized FFmpeg diagnostic")
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(ocr::validate_source(&root.path("missing.mp4")).is_err());
+    assert!(ocr::validate_source(root.root()).is_err());
+    let mut audio = tools(&root, &good);
+    audio.ffprobe = script(
+        &root,
+        "audio-probe",
+        r#"printf '%s\n' '{"streams":[{"index":0,"codec_type":"audio"}]}'"#,
+    );
+    assert!(ocr::analyze(&OcrState::default(), &path, &audio, |_, _| {})
+        .unwrap_err()
+        .contains("no usable video"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn integration_ocr_cancellation_is_separate_from_download_processes_and_double_starts() {
+    let root = TempRoot::new("ocr-cancel");
+    let db = Arc::new(db());
+    let path = root.path("saved.mp4");
+    fs::write(&path, b"video").unwrap();
+    db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE history_entries SET output_path=?1 WHERE id='video'",
+            [path.to_str().unwrap()],
+        )
+        .unwrap();
+    let state = Arc::new(OcrState::initialize(root.root(), &db).unwrap());
+    let ready = root.path("ready");
+    let helper = format!(
+        "{READY}\nread -r request\nprintf ready > '{}'\nsleep 30",
+        ready.display()
+    );
+    let tools = tools(&root, &helper);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let started = ocr::start(db.clone(), state.clone(), "video".into(), tools, move |p| {
+        let _ = sender.send(p);
+    })
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ocr::start(
+        db.clone(),
+        state.clone(),
+        "video".into(),
+        self::tools(&root, &helper),
+        |_| {}
+    )
+    .unwrap_err()
+    .contains("already running"));
+    let downloads = crate::process::ProcessState::default();
+    let mut command = std::process::Command::new("/bin/sleep");
+    command.arg("30");
+    crate::process::configure_child_process_group(&mut command);
+    let child = Arc::new(std::sync::Mutex::new(command.spawn().unwrap()));
+    crate::process::register_current_child(&downloads, &child).unwrap();
+    state.cancel(&db, "video", &started.attempt_id).unwrap();
+    state.stop();
+    assert!(child.lock().unwrap().try_wait().unwrap().is_none());
+    let last = receiver.try_iter().last().unwrap();
+    assert_eq!(last.status, "cancelled");
+    assert_eq!(
+        ocr_store::get(&db, "video")
+            .unwrap()
+            .unwrap()
+            .last_attempt_status,
+        "cancelled"
+    );
+    crate::process::terminate_child_process_tree(&mut child.lock().unwrap()).unwrap();
+    child.lock().unwrap().wait().unwrap();
+}

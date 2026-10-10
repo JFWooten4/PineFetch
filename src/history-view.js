@@ -16,6 +16,7 @@ export const createHistoryView = ({
     const state = Object.seal({
         historyOffset: 0,
         historyHasMore: false,
+        historyTotalCount: null,
         historyLoading: false,
         historyLoaded: false,
         historyDirty: true,
@@ -87,8 +88,15 @@ export const createHistoryView = ({
         els.loadMoreHistoryBtn.textContent = isLoading ? 'Loading...' : 'Load more';
     };
 
+    const updateHistoryResultCount = () => {
+        const hasCount = Boolean(state.historyQuery) && state.historyTotalCount !== null;
+        els.historyResultCount.textContent = hasCount ? `${state.historyTotalCount.toLocaleString()} found` : '';
+        els.historyResultCount.hidden = !isActive() || !hasCount;
+    };
+
     const updateHistoryActions = () => {
         els.loadMoreHistoryBtn.hidden = !state.historyHasMore;
+        updateHistoryResultCount();
     };
 
     const setHistoryActionStatus = (message, isError = false) => {
@@ -165,6 +173,8 @@ export const createHistoryView = ({
     const invalidateHistoryCache = () => {
         state.historyDirty = true;
         state.historyRevision += 1;
+        state.historyTotalCount = null;
+        updateHistoryResultCount();
     };
 
     const createHistoryItem = entry => {
@@ -254,12 +264,14 @@ export const createHistoryView = ({
     };
 
     const renderHistory = async ({ append = false, force = false } = {}) => {
+        updateHistoryResultCount();
         if (!append && !force && state.historyLoaded && !state.historyDirty) return;
 
         if (!api.available) {
             els.historyList.replaceChildren();
             els.historyHint.hidden = true;
             state.historyHasMore = false;
+            state.historyTotalCount = null;
             state.historyLoaded = true;
             state.historyDirty = false;
             updateHistoryActions();
@@ -295,6 +307,8 @@ export const createHistoryView = ({
             const hasMore = Array.isArray(page)
                 ? entries.length === historyPageSize
                 : Boolean(page?.has_more ?? page?.hasMore);
+            const totalCount = Number(page?.total_count);
+            state.historyTotalCount = Number.isSafeInteger(totalCount) && totalCount >= 0 ? totalCount : null;
 
             const fragment = document.createDocumentFragment();
             entries.forEach(entry => fragment.appendChild(createHistoryItem(entry)));

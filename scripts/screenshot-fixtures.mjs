@@ -96,6 +96,7 @@ export const installScreenshotBridge = ({ videos, version }) => {
                         return {
                             entries: structuredClone(history.slice(args.offset, args.offset + args.limit)),
                             has_more: false,
+                            total_count: history.length,
                         };
                     case 'get_history_stats':
                         return {
@@ -104,6 +105,9 @@ export const installScreenshotBridge = ({ videos, version }) => {
                             total_duration_seconds: history.reduce((sum, entry) => sum + entry.duration_seconds, 0),
                             source_counts: [{ source: 'youtube', count: history.length }],
                         };
+                    case 'get_history_ocr':
+                    case 'get_history_ocr_progress':
+                        return null;
                     case 'get_history_details': {
                         const entry = history.find(entry => entry.id === args.id);
                         if (!entry) throw new Error(`Missing history fixture: ${args.id}`);

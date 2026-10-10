@@ -1,5 +1,6 @@
 import { formatHistorySource, formatLocalDateTime, formatUploadDate } from './formatters.js';
 import { closeDialog, initTabs, openDialog, toast } from './vendor/oj/index.js';
+import { createHistoryOcrView } from './history-ocr-view.js';
 
 export const createHistoryDetailsView = ({
     els,
@@ -20,6 +21,7 @@ export const createHistoryDetailsView = ({
         transcript: undefined,
         captions: new Map(),
     };
+    const ocrView = createHistoryOcrView({ els, api, appendLog });
 
     const formatDateTime = timestamp => {
         const date = new Date(Number(timestamp));
@@ -279,11 +281,12 @@ export const createHistoryDetailsView = ({
         }
     };
 
-    const openDetails = async (entryId, returnFocus) => {
+    const openDetails = async (entryId, returnFocus, { ocr = false } = {}) => {
         state.details = null;
         state.transcript = undefined;
         state.captions.clear();
         const requestId = ++state.detailsRequestId;
+        ocrView.reset(entryId);
         els.historyDetailsSubtitle.textContent = '';
         els.historyDetailsStatus.textContent = 'Loading details...';
         els.historyDetailsContent.hidden = true;
@@ -306,11 +309,11 @@ export const createHistoryDetailsView = ({
             els.historyTranscriptTab.disabled = !details.transcript;
             els.historyCaptionsTab.hidden = !details.captions?.length;
             els.historyCaptionsTab.disabled = !details.captions?.length;
-            const visibleTabCount = 1 + Number(Boolean(details.transcript)) + Number(Boolean(details.captions?.length));
-            els.historyDetailsTabs.hidden = visibleTabCount === 1;
+            els.historyDetailsTabs.hidden = false;
             renderOverview(details);
             renderCaptionOptions(details.captions || []);
             els.historyDetailsContent.hidden = false;
+            if (ocr) els.historyOcrTab.click();
         } catch (err) {
             appendLog(`[history details] ${err}`, true);
             if (requestId === state.detailsRequestId) {
@@ -332,6 +335,7 @@ export const createHistoryDetailsView = ({
     };
 
     const bindEvents = () => {
+        ocrView.bindEvents();
         const cleanupTabs = initTabs(els.historyDetailsContent);
         window.addEventListener('pagehide', cleanupTabs, { once: true });
 
@@ -378,6 +382,19 @@ export const createHistoryDetailsView = ({
             const creator = state.contextCreator;
             hideContextMenu();
             if (creator?.uploader && creator.source) showSavedVideosByCreator(creator);
+        });
+        els.historyCheckOcrBtn.addEventListener('click', async () => {
+            const entryId = state.contextEntryId;
+            const returnFocus = state.contextReturnFocus;
+            hideContextMenu();
+            if (!entryId || !api.available) return;
+            try {
+                await api.startHistoryOcr({ id: entryId });
+                await openDetails(entryId, returnFocus, { ocr: true });
+            } catch (error) {
+                appendLog(`[OCR] ${error}`, true);
+                toast(`${error}`, { type: 'error' });
+            }
         });
         document.addEventListener('pointerdown', event => {
             const target = event.target instanceof Element ? event.target : null;
@@ -430,6 +447,7 @@ export const createHistoryDetailsView = ({
             if (event.target !== els.historyDetailsContent) return;
             if (event.detail.tab === els.historyTranscriptTab) void loadTranscript();
             if (event.detail.tab === els.historyCaptionsTab) void loadSelectedCaption();
+            if (event.detail.tab === els.historyOcrTab) void ocrView.load();
         });
         els.historyCaptionTrackSelect.addEventListener('change', () => void loadSelectedCaption());
         els.historyTranscriptCopyBtn.addEventListener(

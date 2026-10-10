@@ -29,8 +29,8 @@ Imports name the owning module explicitly. Production modules do not import the
 root namespace through `use super::*`. Shared models and rules do not depend on
 Tauri, SQLite, global application state or running external programs.
 
-`AppState` contains five components: `ConfigState`, one shared `Database`,
-`QueueState`, `ProcessState` and Link Dump server state. Database operations take
+`AppState` contains `ConfigState`, one shared `Database`, `QueueState`,
+`ProcessState`, OCR state and Link Dump server state. Database operations take
 the database; configuration operations take the configuration component; process
 helpers take process state. They cannot implicitly access unrelated subsystems.
 The configuration cache shares the same connection through `Arc`; no additional
@@ -155,8 +155,9 @@ alias and decimal timestamp rules at the corresponding entry points.
 
 The API client, queue core, owned-file handling, config/history normalizers,
 process runner and secure secret generation were already shared and are reused.
-There is no new dependency, schema migration, public command, package or plugin
-layer. Pure URL/timestamp helpers and yt-dlp argument builders/parsers could be
+These extractions add no general plugin layer. Local OCR separately adds its
+migration, native helper, commands and neutral DTOs in `models`. Pure URL/timestamp
+helpers and yt-dlp argument builders/parsers could be
 candidates for later use by another application, but no external library is
 extracted in this work. Their current contracts remain internal to PineFetch.
 
@@ -170,9 +171,15 @@ Database initialization and legacy imports finish before the native event loop
 starts. `main` handles persistence errors with a diagnostic and exit code 1;
 Tauri's setup hook only installs the initialized state and starts services.
 
-Schema version, migration SQL, legacy JSON formats, completion receipts, backup
-policy and file ownership rules are unchanged. See [DATA-INTEGRITY.md](DATA-INTEGRITY.md)
+Schema changes use explicit ordered migrations. Legacy JSON formats, completion
+receipts, backup policy and file ownership rules remain in place. See [DATA-INTEGRITY.md](DATA-INTEGRITY.md)
 for those guarantees and their temporary-database/fault-injection regressions.
+
+Local OCR uses `ocr` for background orchestration and an independent process
+registry, `ocr_rules` for conservative grouping/media/protocol validation and
+`ocr_store` for guarded SQL. `history-ocr-view.js` owns the lazy detail tab through
+the API client. Additive schema 3 and the compiled Vision resource are documented
+in [OCR.md](OCR.md); no general job framework is introduced.
 
 ## Frontend boundary
 

@@ -161,6 +161,7 @@ pub(super) fn search_history_page_from_db(
     Ok(HistoryPage {
         entries,
         has_more: loaded_count < total.max(0) as u64,
+        total_count: total.max(0) as u64,
     })
 }
 

@@ -1,0 +1,2 @@
+The build script compiles native/vision-ocr.swift into this directory on macOS.
+No Swift compiler or developer paths are used at application runtime.

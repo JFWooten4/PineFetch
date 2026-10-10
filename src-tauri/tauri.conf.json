@@ -6,6 +6,7 @@
     "build": {
         "beforeBuildCommand": "npm run sync:design-system",
         "beforeDevCommand": "node scripts/dev-server.mjs",
+        "additionalWatchFolders": ["../native", "../scripts"],
         "devUrl": "http://127.0.0.1:1420",
         "frontendDist": "../src"
     },
@@ -35,6 +36,7 @@
             "resources/whisper-runtime",
             "resources/ffmpeg-runtime",
             "resources/deno-runtime",
+            "resources/ocr-runtime",
             "icons/icon.png"
         ],
         "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"]

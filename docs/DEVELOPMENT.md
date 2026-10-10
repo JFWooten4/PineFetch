@@ -32,6 +32,17 @@ from the bundled `rusqlite` source, so a C compiler is required. No Homebrew
 SQLite or GTK installation is needed for the application checks. The existing
 process tests also use the standard macOS `sh` and `sleep` commands.
 
+Cargo also compiles the Apple Vision helper through `build.rs` and
+`scripts/prepare-ocr-runtime.sh`. This covers development, the compile/link gate
+and real app builds; end users need no Swift compiler. See [OCR.md](OCR.md) for
+platform availability, resource resolution and native/bundle smoke checks.
+
+Unchanged OCR build inputs reuse the signed helper without rewriting it. The
+generated `resources/ocr-runtime/` directory is excluded from the Tauri dev
+watcher in `src-tauri/.taurignore`, preventing build output from restarting its
+own build. Native sources and build scripts are explicitly watched. Restart
+`npm run dev` after changing watcher configuration.
+
 The GitHub runner supplies Xcode, the SDK, and these native system tools; the
 shared setup action verifies their availability. It installs the pinned Rust
 toolchain and Node version explicitly. The npm cache only accelerates downloads;

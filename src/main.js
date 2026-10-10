@@ -93,6 +93,7 @@ const els = Object.seal({
     downloadView: document.getElementById('downloadView'),
     historyView: document.getElementById('historyView'),
     historyList: document.getElementById('historyList'),
+    historyResultCount: document.getElementById('historyResultCount'),
     historySearchInput: document.getElementById('historySearchInput'),
     historySearchFieldDropdown: document.getElementById('historySearchFieldDropdown'),
     historySearchFieldValue: document.getElementById('historySearchFieldValue'),
@@ -123,6 +124,17 @@ const els = Object.seal({
     historyShowMoreDataBtn: document.getElementById('historyShowMoreDataBtn'),
     historyOpenInBrowserBtn: document.getElementById('historyOpenInBrowserBtn'),
     historyShowCreatorVideosBtn: document.getElementById('historyShowCreatorVideosBtn'),
+    historyCheckOcrBtn: document.getElementById('historyCheckOcrBtn'),
+    historyOcrTab: document.getElementById('historyOcrTab'),
+    historyOcrStatus: document.getElementById('historyOcrStatus'),
+    historyOcrNotice: document.getElementById('historyOcrNotice'),
+    historyOcrProgress: document.getElementById('historyOcrProgress'),
+    historyOcrProgressText: document.getElementById('historyOcrProgressText'),
+    historyOcrCancelBtn: document.getElementById('historyOcrCancelBtn'),
+    historyOcrCopyBtn: document.getElementById('historyOcrCopyBtn'),
+    historyOcrText: document.getElementById('historyOcrText'),
+    historyOcrMeta: document.getElementById('historyOcrMeta'),
+    historyOcrSamplingNotice: document.getElementById('historyOcrSamplingNotice'),
     historyDetailsDialog: document.getElementById('historyDetailsDialog'),
     historyDetailsTitle: document.getElementById('historyDetailsTitle'),
     historyDetailsSubtitle: document.getElementById('historyDetailsSubtitle'),
@@ -382,6 +394,7 @@ const setActiveView = view => {
 
     els.downloadView.hidden = !isDownload;
     els.historyView.hidden = !isHistory;
+    els.historyResultCount.hidden = true;
     els.settingsView.hidden = !isSettings;
     els.linkDumpView.hidden = !isLinkDump;
     els.queueProgressView.hidden = !isDownload || state.queueCollapsed;

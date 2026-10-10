@@ -579,7 +579,7 @@ fn version_one_upgrade_and_sql_failure_roll_back_entire_section_and_retry() {
     // Construct the version-1 baseline using the implemented adoption step,
     // then fail version 2. Version 1 is an internal baseline, not an old app.
     conn.execute_batch(
-        "DROP TABLE job_completions; DROP TABLE legacy_imports; PRAGMA user_version=1;",
+        "DROP TABLE history_ocr; DROP TABLE job_completions; DROP TABLE legacy_imports; PRAGMA user_version=1;",
     )
     .unwrap();
     let before = schema(&conn);
@@ -609,7 +609,7 @@ fn future_corrupt_unknown_and_conflicting_layouts_are_preserved() {
     drop(conn);
     let bytes = fs::read(f.path("pinefetch.sqlite3")).unwrap();
     let error = database::open(&f.path("pinefetch.sqlite3")).unwrap_err();
-    assert!(error.contains("999") && error.contains("2"));
+    assert!(error.contains("999") && error.contains(&SCHEMA_VERSION.to_string()));
     assert_eq!(bytes, fs::read(f.path("pinefetch.sqlite3")).unwrap());
     assert!(f.backups().is_empty());
     let conn = Connection::open(f.path("unknown.sqlite3")).unwrap();

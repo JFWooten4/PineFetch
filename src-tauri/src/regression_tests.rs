@@ -1732,20 +1732,24 @@ fn history_search_filters_all_entries_before_pagination() {
         search_history_page_from_db(&state.db, 5, 5, Some("pine"), Some("title"), None, false)
             .unwrap();
     assert_eq!(first.entries.len(), 5);
+    assert_eq!(first.total_count, 12);
     assert!(first.has_more);
     assert_eq!(first.entries[0].id, "history-33");
     assert_eq!(second.entries[0].id, "history-18");
     assert!(second.has_more);
+    assert_eq!(second.total_count, 12);
     let final_page =
         search_history_page_from_db(&state.db, 5, 10, Some("pine"), Some("title"), None, false)
             .unwrap();
     assert_eq!(final_page.entries.len(), 2);
+    assert_eq!(final_page.total_count, 12);
     assert!(!final_page.has_more);
 
     let empty_query =
         search_history_page_from_db(&state.db, 5, 0, Some("  "), Some("title"), None, false)
             .unwrap();
     assert_eq!(empty_query.entries[0].id, "history-34");
+    assert_eq!(empty_query.total_count, 35);
 }
 
 #[test]
@@ -1943,10 +1947,12 @@ fn history_search_exact_creator_keeps_platform_and_pagination_scoped() {
     };
     let first = search(0, "Blender", true);
     assert_eq!(first.entries.len(), 20);
+    assert_eq!(first.total_count, 25);
     assert_eq!(first.entries[0].id, "creator-24");
     assert!(first.has_more);
     let last = search(20, "Blender", true);
     assert_eq!(last.entries.len(), 5);
+    assert_eq!(last.total_count, 25);
     assert_eq!(last.entries[0].id, "creator-04");
     assert!(!last.has_more);
     assert!(first.entries.iter().chain(&last.entries).all(|entry| {
@@ -1966,7 +1972,9 @@ fn history_search_exact_creator_keeps_platform_and_pagination_scoped() {
         .entries
         .iter()
         .any(|entry| entry.id == "other-platform"));
-    assert!(search(0, "missing", true).entries.is_empty());
+    let missing = search(0, "missing", true);
+    assert!(missing.entries.is_empty());
+    assert_eq!(missing.total_count, 0);
     let literal = search(0, r"100%_done C:\notes don't", true);
     assert_eq!(literal.entries.len(), 1);
     assert_eq!(literal.entries[0].id, "literal-name");

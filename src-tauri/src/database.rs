@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
-pub(super) const SCHEMA_VERSION: i64 = 2;
+pub(super) const SCHEMA_VERSION: i64 = 3;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 // The reported upgraded layout retains this stronger, compatible constraint.
 const LEGACY_HISTORY_VERSION: &str = "2.1.0";
@@ -51,6 +51,25 @@ CREATE TABLE job_completions (
     history_entry_id TEXT UNIQUE,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (history_entry_id) REFERENCES history_entries(id) ON DELETE SET NULL
+);
+"#;
+
+// Migration 3 is additive; published migrations 1 and 2 stay unchanged.
+const OCR_SQL: &str = r#"
+CREATE TABLE history_ocr (
+    history_entry_id TEXT PRIMARY KEY NOT NULL,
+    text TEXT,
+    segments_json TEXT,
+    source_sha256 TEXT,
+    engine TEXT,
+    engine_version TEXT,
+    settings_json TEXT,
+    result_created_at INTEGER,
+    last_attempt_id TEXT NOT NULL,
+    last_attempt_status TEXT NOT NULL CHECK (last_attempt_status IN ('running', 'completed', 'error', 'cancelled', 'interrupted')),
+    last_attempt_at INTEGER NOT NULL,
+    last_error TEXT,
+    FOREIGN KEY (history_entry_id) REFERENCES history_entries(id) ON DELETE CASCADE
 );
 "#;
 
@@ -148,6 +167,7 @@ pub(super) enum MigrationPoint {
     BackedUp,
     Adopted,
     Receipts,
+    Ocr,
 }
 
 pub(super) fn initialize_with_hook(
@@ -195,6 +215,13 @@ pub(super) fn initialize_with_hook(
         tx.pragma_update(None, "user_version", 2)
             .map_err(|e| e.to_string())?;
         hook(MigrationPoint::Receipts)?;
+    }
+    if version < 3 {
+        tx.execute_batch(OCR_SQL)
+            .map_err(|e| format!("SQLite migration 3 failed: {e}"))?;
+        tx.pragma_update(None, "user_version", 3)
+            .map_err(|e| e.to_string())?;
+        hook(MigrationPoint::Ocr)?;
     }
     if check_version(&tx)? != SCHEMA_VERSION {
         return Err(
@@ -355,6 +382,11 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
             .execute_batch(RECEIPTS_SQL)
             .map_err(|e| e.to_string())?;
     }
+    if version >= 3 {
+        reference
+            .execute_batch(OCR_SQL)
+            .map_err(|e| e.to_string())?;
+    }
     reference
         .execute_batch("CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
         .map_err(|e| e.to_string())?;
@@ -394,6 +426,9 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
                 "Inconsistent schema 2: missing completion/import receipts; database preserved"
                     .into(),
             );
+        }
+        if version >= 3 && !tables.contains("history_ocr") {
+            return Err("Inconsistent schema 3: missing history_ocr; database preserved".into());
         }
     } else if (tables.contains("captions") || tables.contains("transcriptions"))
         && !tables.contains("history_entries")
@@ -512,6 +547,11 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
             && !canonical.contains("check(statein('processing','output_ready','complete'))")
         {
             return Err(format!("{} (completion state constraint)", fail()));
+        }
+        if table == "history_ocr"
+            && !canonical.contains("check(last_attempt_statusin('running','completed','error','cancelled','interrupted'))")
+        {
+            return Err(format!("{} (OCR attempt status constraint)", fail()));
         }
         if version < SCHEMA_VERSION {
             // SQLite's historical TEXT PRIMARY KEY permits NULL. Refuse

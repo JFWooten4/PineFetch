@@ -221,6 +221,64 @@ pub(crate) fn get_history_caption(
 }
 
 #[tauri::command]
+pub(crate) fn get_history_ocr(
+    state: State<AppState>,
+    id: String,
+) -> Result<Option<crate::models::OcrContent>, String> {
+    crate::ocr_store::get(&state.db, &id)
+}
+
+#[tauri::command]
+pub(crate) fn get_history_ocr_progress(
+    state: State<AppState>,
+    id: String,
+) -> Result<Option<crate::models::OcrProgress>, String> {
+    state.ocr.progress(&id)
+}
+
+#[tauri::command]
+pub(crate) fn cancel_history_ocr(
+    state: State<AppState>,
+    id: String,
+    attempt_id: String,
+) -> Result<(), String> {
+    state.ocr.cancel(&state.db, &id, &attempt_id)
+}
+
+#[tauri::command]
+pub(crate) fn start_history_ocr(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+) -> Result<crate::models::OcrProgress, String> {
+    use tauri::Emitter;
+    let helper = crate::runtime::resolve_ocr_helper(&app)?;
+    let configured = state
+        .config
+        .lock()
+        .map_err(|_| "Config lock poisoned")?
+        .yt_dlp_path
+        .clone();
+    let directory =
+        crate::runtime::resolve_ffmpeg_location(&app, configured.as_deref().unwrap_or(""))
+            .ok_or("FFmpeg and ffprobe are required for OCR.")?;
+    let tools = crate::ocr::OcrTools {
+        helper,
+        ffmpeg: std::path::Path::new(&directory).join(crate::runtime::ffmpeg_tool_name()),
+        ffprobe: std::path::Path::new(&directory).join(crate::runtime::ffprobe_tool_name()),
+    };
+    crate::ocr::start(
+        state.db.clone(),
+        state.ocr.clone(),
+        id,
+        tools,
+        move |progress| {
+            let _ = app.emit("history:ocr", progress);
+        },
+    )
+}
+
+#[tauri::command]
 pub(crate) fn remove_history_entry(state: State<AppState>, id: String) -> Result<(), String> {
     delete_history_entry_from_db(&state.db, &id)?;
     Ok(())

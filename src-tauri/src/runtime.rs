@@ -7,6 +7,34 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tauri::Manager;
 
+pub(crate) fn resolve_ocr_helper(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Apple Vision OCR is available on macOS only.".into());
+    }
+    let arch = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x86_64"
+    };
+    for relative in [
+        format!("ocr-runtime/vision-ocr-{arch}"),
+        format!("resources/ocr-runtime/vision-ocr-{arch}"),
+    ] {
+        if let Ok(path) = app
+            .path()
+            .resolve(relative, tauri::path::BaseDirectory::Resource)
+        {
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+    }
+    Err(
+        "The bundled Apple Vision OCR helper is unavailable. Rebuild or reinstall PineFetch."
+            .into(),
+    )
+}
+
 pub(crate) fn ffmpeg_tool_name() -> &'static str {
     if cfg!(windows) {
         "ffmpeg.exe"

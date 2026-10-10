@@ -31,6 +31,11 @@ mod link_dump_store;
 mod media_tools;
 mod metadata;
 mod models;
+mod ocr;
+mod ocr_rules;
+mod ocr_store;
+#[cfg(test)]
+mod ocr_tests;
 #[cfg(test)]
 mod persistence_failure_tests;
 mod platform;
@@ -135,6 +140,10 @@ fn main() {
             commands::get_history_details,
             commands::get_history_transcript,
             commands::get_history_caption,
+            commands::start_history_ocr,
+            commands::cancel_history_ocr,
+            commands::get_history_ocr,
+            commands::get_history_ocr_progress,
             commands::remove_history_entry,
             commands::clear_history,
             commands::get_link_dump_overview,
@@ -156,6 +165,7 @@ fn main() {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             let state = app_handle.state::<AppState>();
             stop_active_download_on_exit(state.inner());
+            state.ocr.stop();
             stop_link_dump_server(state.inner());
             if let Some(server) = app_handle.try_state::<cli::CliServer>() {
                 server.stop();

@@ -5,7 +5,7 @@ PineFetch stores local data in `pinefetch.sqlite` under Tauri's
 Link Dump settings and secret **hashes**, history metadata, transcript text,
 caption text and their file relationships. Media, transcript and caption files
 remain in the selected output directory. Removing or clearing history deletes
-database records and their existing caption/transcript dependents; it does not
+database records and their caption/transcript/OCR dependents; it does not
 delete downloaded files.
 
 Legacy inputs are `config.json` under `app_config_dir()` and `history.json`
@@ -38,10 +38,10 @@ is not promised. Other read errors are propagated. See
 [SQLite hot-journal recovery](https://www.sqlite.org/lockingv3.html#dealing_with_hot_journals).
 
 `PRAGMA user_version` is the single authoritative **schema** version, currently
-**2**. It is independent of the package/release version. Import markers describe
+**3**. It is independent of the package/release version. Import markers describe
 imports only; they are not additional migration-version authorities.
 
-Versions outside `0..=2` are refused with the present and supported versions.
+Versions outside `0..=3` are refused with the present and supported versions.
 There is no downgrade or repair. Compatibility is checked again after acquiring
 the migration writer lock, so a competing newer process cannot turn an old
 preflight result into an unsafe upgrade. Every application write also rechecks
@@ -79,9 +79,12 @@ The entire required upgrade section uses one `BEGIN IMMEDIATE` transaction:
    `app_meta` config-import marker, and apply the existing source backfill.
 2. **Version 2:** add `legacy_imports` and `job_completions`. These are import
    and completion receipts; they do not persist the queue or enable resume.
+3. **Version 3:** add `history_ocr` with one cascading row per History entry.
+   Successful results and latest attempts are independent; see [OCR.md](OCR.md)
+   for replacement, cancellation and source-version guarantees.
 
 Each step writes its literal version inside the same transaction. The final
-version is checked before commit. A failure in either step rolls back **all**
+version is checked before commit. A failure in any step rolls back **all**
 steps in that upgrade attempt, including schema, data changes and versions.
 After the error is resolved, reopening repeats the upgrade from its previous
 committed version. There are no nested transactions. External downloads,
@@ -142,7 +145,7 @@ Arbitrary modified layouts, every possible interrupted legacy combination and
 other release tags are not individually proven. Pre-SQLite JSON data is covered
 by JSON fixtures, not a claimed older SQLite schema.
 
-Once released, migration 1, migration 2 and their helper behavior are immutable.
+Once released, migrations and their helper behavior are immutable.
 For a change: add the next explicit ordered step, update the maximum supported
 version and metadata validator for each still-supported version, and add real
 file fixtures for successful upgrade, SQL failure, unchanged committed version,
