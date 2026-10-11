@@ -19,7 +19,7 @@ const videos = await Promise.all(
     }))
 );
 
-const installUiResponses = () => {
+const installUiResponses = fallbackFrame => {
     const invoke = globalThis.__TAURI__.core.invoke;
     const listen = globalThis.__TAURI__.event.listen;
     const listeners = new Map();
@@ -42,6 +42,7 @@ const installUiResponses = () => {
         holdFrame: false,
         releaseFrame: null,
         failNextFrame: false,
+        frameImages: {},
         failNextOcrDelete: false,
         failNextModelSave: false,
         releasePresets,
@@ -136,7 +137,10 @@ const installUiResponses = () => {
                 ui.failNextFrame = false;
                 throw new Error('Fixture saved file is missing.');
             }
-            const image = globalThis.document.querySelector('#historyDetailsThumbnail').src;
+            const image =
+                ui.frameImages[args.selection.observed_at_ms] ||
+                globalThis.document.querySelector('#historyDetailsThumbnail').getAttribute('src') ||
+                fallbackFrame;
             if (ui.holdFrame) {
                 ui.holdFrame = false;
                 return new Promise(resolve => {
@@ -154,8 +158,11 @@ const installUiResponses = () => {
             if (content.last_attempt_status === 'running') throw new Error('Analysis is running');
             if (JSON.stringify(content.segments) !== args.selection.result_revision) throw new Error('Results changed');
             const segment = content.segments[args.selection.segment_index];
-            segment.observed_at_ms = segment.observed_at_ms.filter(time => time !== args.selection.observed_at_ms);
-            if (!segment.observed_at_ms.length) content.segments.splice(args.selection.segment_index, 1);
+            if (args.wholeSegment) content.segments.splice(args.selection.segment_index, 1);
+            else {
+                segment.observed_at_ms = segment.observed_at_ms.filter(time => time !== args.selection.observed_at_ms);
+                if (!segment.observed_at_ms.length) content.segments.splice(args.selection.segment_index, 1);
+            }
             content.text = '';
             return { ...structuredClone(content), result_revision: JSON.stringify(content.segments) };
         }
@@ -242,7 +249,7 @@ try {
                 return route.abort('blockedbyclient');
             });
             await context.addInitScript({
-                content: `(${installScreenshotBridge.toString()})(${JSON.stringify({ videos, version })}); (${installUiResponses.toString()})();`,
+                content: `(${installScreenshotBridge.toString()})(${JSON.stringify({ videos, version })}); (${installUiResponses.toString()})(${JSON.stringify(videos[0].thumbnail)});`,
             });
             const page = await context.newPage();
             const errors = [];
@@ -873,80 +880,79 @@ try {
                         return { id, x, y, width, height };
                     })
                 );
-            const checkOcrLayout = async (state, { results = true } = {}) => {
+            const pinnedOcrLayout = () =>
+                page.evaluate(() =>
+                    ['historyOcrPreview', 'historyOcrSearchInput', 'historyOcrMeta'].map(id => {
+                        const { x, y, width, height } = globalThis.document.getElementById(id).getBoundingClientRect();
+                        return { id, x, y, width, height };
+                    })
+                );
+            const checkOcrLayout = async state => {
                 while (await page.locator('.oj-toast-dismiss').count())
                     await page.locator('.oj-toast-dismiss').first().click();
                 for (const viewport of [
                     { width: 1000, height: 960 },
                     { width: 1600, height: 1100 },
+                    { width: 1000, height: 720 },
                 ]) {
                     await page.setViewportSize(viewport);
-                    await page.locator('#historyOcrPanel').evaluate(el => {
-                        el.scrollTop = 0;
-                    });
                     const layout = await page.evaluate(() => {
                         const panel = globalThis.document.getElementById('historyOcrPanel');
                         const rect = selector => panel.querySelector(selector).getBoundingClientRect().toJSON();
-                        const info = panel.querySelector('.pinefetch-ocr-preview-info');
+                        const right = panel.querySelector('#historyOcrResults');
+                        const footer = panel.querySelector('.pinefetch-ocr-analysis-info');
                         return {
+                            panel: panel.getBoundingClientRect().toJSON(),
                             actions: rect('.pinefetch-ocr-actions'),
                             start: rect('#historyOcrStartBtn'),
+                            cancel: rect('#historyOcrCancelBtn'),
                             copy: rect('#historyOcrCopyBtn'),
-                            startVisible: !panel.querySelector('#historyOcrStartBtn').hidden,
-                            viewer: rect('#historyOcrPreview'),
+                            activeButton: panel.querySelector('#historyOcrStartBtn').hidden ? 'cancel' : 'start',
+                            workspace: rect('.pinefetch-ocr-workspace'),
+                            preview: rect('#historyOcrPreview'),
                             frame: rect('.pinefetch-ocr-frame-stage'),
-                            info: rect('.pinefetch-ocr-preview-info'),
-                            results: rect('#historyOcrResults'),
+                            time: rect('#historyOcrFrameTime'),
+                            right: rect('#historyOcrResults'),
                             heading: rect('#historyOcrResultsTitle'),
                             search: rect('#historyOcrSearchInput'),
-                            count: rect('#historyOcrResultCount'),
-                            list: rect('#historyOcrText'),
-                            rightSide: [
-                                'historyOcrPreviewTitle',
-                                'historyOcrFrameTime',
-                                'historyOcrSelectedText',
+                            list: rect('#historyOcrListViewport'),
+                            footer: rect('.pinefetch-ocr-analysis-info'),
+                            rightSide: ['historyOcrResultsTitle', 'historyOcrSearchInput', 'historyOcrText'].every(id =>
+                                right.contains(globalThis.document.getElementById(id))
+                            ),
+                            footerInfo: [
                                 'historyOcrMeta',
                                 'historyOcrNotice',
                                 'historyOcrActionNotice',
                                 'historyOcrPreviousResult',
                                 'historyOcrAnalysis',
-                            ].every(id => info.contains(globalThis.document.getElementById(id))),
-                            overflow: panel.scrollWidth > panel.clientWidth,
-                            nestedScrollers: [...panel.querySelectorAll('*')].filter(
-                                el =>
-                                    /auto|scroll/.test(globalThis.getComputedStyle(el).overflowY) &&
-                                    el.scrollHeight > el.clientHeight
-                            ).length,
-                            directSections: [...panel.children].map(el => el.id || el.className),
+                            ].every(id => footer.contains(globalThis.document.getElementById(id))),
+                            overflow: panel.scrollWidth > panel.clientWidth || panel.scrollHeight > panel.clientHeight,
+                            scrollContainers: [...panel.querySelectorAll('*')]
+                                .filter(el => /auto|scroll/.test(globalThis.getComputedStyle(el).overflowY))
+                                .map(el => el.id),
                         };
                     });
-                    assert(layout.rightSide);
+                    assert(layout.rightSide && layout.footerInfo);
                     assert.equal(layout.overflow, false);
-                    assert.equal(layout.nestedScrollers, 0);
-                    assert.deepEqual(layout.directSections, [
-                        'oj-toolbar pinefetch-ocr-actions',
-                        'historyOcrPreview',
-                        'historyOcrResults',
-                    ]);
-                    assert(layout.viewer.top >= layout.actions.bottom);
-                    assert(layout.info.left >= layout.frame.right);
-                    assert(Math.abs(layout.frame.width / (layout.frame.width + layout.info.width) - 0.64) < 0.01);
-                    assert(layout.frame.height > 240);
-                    assert(layout.frame.height <= viewport.height * 0.4 + 2);
+                    assert(layout.panel.bottom <= viewport.height, JSON.stringify(layout));
+                    assert.deepEqual(layout.scrollContainers, ['historyOcrListViewport']);
+                    assert(layout.workspace.top >= layout.actions.bottom);
+                    assert(layout.right.left >= layout.preview.right);
+                    assert(Math.abs(layout.right.top - layout.preview.top) < 1);
+                    assert(Math.abs(layout.preview.width / (layout.preview.width + layout.right.width) - 0.55) < 0.01);
+                    assert(layout.frame.height > 150);
+                    assert(layout.time.top >= layout.frame.bottom);
+                    assert(layout.time.bottom <= layout.panel.bottom);
+                    assert(layout.search.top >= layout.heading.bottom);
+                    assert(layout.list.top >= layout.search.bottom);
+                    assert(layout.list.height > 60, JSON.stringify(layout));
+                    assert(layout.footer.top >= layout.list.bottom);
+                    assert(layout.footer.bottom <= layout.panel.bottom);
                     assert(Math.abs(layout.copy.right - layout.actions.right) < 1);
                     assert(layout.copy.height >= 36);
-                    if (layout.startVisible) {
-                        assert.equal(layout.start.height, layout.copy.height);
-                        assert(layout.start.right < layout.copy.left);
-                    }
-                    if (results) {
-                        assert(layout.results.top >= layout.viewer.bottom);
-                        assert(layout.results.top - layout.viewer.bottom <= 24);
-                        assert(Math.abs(layout.results.width - layout.viewer.width) < 1);
-                        assert(layout.search.top >= layout.heading.bottom);
-                        assert(layout.count.top >= layout.search.bottom);
-                        assert(layout.list.top >= layout.count.bottom);
-                    }
+                    assert.equal(layout[layout.activeButton].height, layout.copy.height);
+                    assert(layout[layout.activeButton].right < layout.copy.left);
                     assert(
                         await page
                             .locator('#historyOcrCopyBtn')
@@ -959,19 +965,19 @@ try {
                     );
                     assert.equal(await page.locator('#historyOcrCopyBtn').count(), 1);
                     assert.equal(await page.locator('#historyOcrStartBtn').count(), 1);
+                    assert.equal(await page.locator('#historyOcrText').count(), 1);
+                    assert.equal(
+                        await page
+                            .locator('#historyOcrSelectedText, #historyOcrEntryCount, #historyOcrPreviewTitle')
+                            .count(),
+                        0
+                    );
                     assert.doesNotMatch(
                         await page.locator('#historyOcrPanel').textContent(),
                         /Extract text appearing in video frames using Apple Vision|Times are observations from sampled frames|Analysis runs in the background/
                     );
-                    assert.equal(
-                        await page
-                            .locator('#historyOcrPanel')
-                            .getByRole('heading', { name: 'OCR Analysis', exact: true })
-                            .count(),
-                        0
-                    );
                     await page.screenshot({
-                        path: `/tmp/pinefetch-ocr-layout-${state}-${viewport.width}-${engine.name()}.png`,
+                        path: `/tmp/pinefetch-ocr-review-${state}-${viewport.width}x${viewport.height}-${engine.name()}.png`,
                     });
                 }
                 await page.setViewportSize({ width: 1400, height: 960 });
@@ -1056,7 +1062,7 @@ try {
                 globalThis.__pinefetchUi.emit('history:ocr', progress);
             });
             await page.screenshot({ path: `/tmp/pinefetch-ocr-progress-${engine.name()}.png` });
-            await checkOcrLayout('running', { results: false });
+            await checkOcrLayout('running');
             await page.setViewportSize({ width: 1400, height: 960 });
             await closeDetails();
             assert.equal(
@@ -1140,8 +1146,9 @@ try {
                     result_created_at: 1700000000000,
                     text: 'plain text',
                     segments: [
-                        { text: '<img src=x onerror=alert(1)> 12!', observed_at_ms: [3020, 9030] },
-                        { text: 'Second text', observed_at_ms: [4030] },
+                        { text: '<img src=x onerror=alert(1)> 12!', observed_at_ms: [3020, 4030, 5040] },
+                        { text: 'Second text', observed_at_ms: [6000] },
+                        { text: '<img src=x onerror=alert(1)> 12!', observed_at_ms: [9030] },
                     ],
                 };
                 delete ui.ocrProgress['history-1'];
@@ -1161,7 +1168,7 @@ try {
             assert.equal(await page.locator('#historyOcrText li').count(), 3);
             assert.deepEqual(await page.locator('#historyOcrText .pinefetch-ocr-select').allTextContents(), [
                 '00:00:03',
-                '00:00:04',
+                '00:00:06',
                 '00:00:09',
             ]);
             await page.locator('#historyOcrSearchInput').fill('second');
@@ -1178,11 +1185,11 @@ try {
             await page.locator('#historyOcrCopyBtn').click();
             assert.match(
                 await page.evaluate(() => globalThis.__pinefetchUi.copied),
-                /^\[00:00:03.020, 00:00:09.030\] <img/
+                /^\[00:00:03.020, 00:00:04.030, 00:00:05.040\] <img/
             );
             await page.locator('#historyOcrSearchInput').fill('');
             assert(await page.locator('#historyOcrPreview').isVisible());
-            assert(await page.locator('#historyOcrFrame').isHidden());
+            await page.locator('#historyOcrFrame').waitFor();
             await page.locator('.pinefetch-ocr-select').first().focus();
             await page.keyboard.press('Enter');
             await page.locator('#historyOcrFrame').waitFor();
@@ -1193,25 +1200,45 @@ try {
                     .evaluate(el => el === globalThis.document.activeElement)
             );
             assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:03');
-            assert.match(await page.locator('#historyOcrSelectedText').textContent(), /^<img/);
-            assert.equal(await page.locator('#historyOcrSelectedText img').count(), 0);
+            assert.match(
+                await page.locator('.pinefetch-ocr-result[aria-current="true"] .oj-text').textContent(),
+                /^<img/
+            );
+            assert.equal(await page.locator('.pinefetch-ocr-result[aria-current="true"] .oj-text img').count(), 0);
             const frameCall = await page.evaluate(() =>
                 globalThis.__pinefetchUi.commands.findLast(call => call.command === 'get_history_ocr_frame')
             );
             assert.equal(frameCall.args.id, 'history-1');
             assert.equal(frameCall.args.selection.segment_index, 0);
             assert.equal(frameCall.args.selection.observed_at_ms, 3020);
-            await page.evaluate(() => {
-                globalThis.__pinefetchUi.holdFrame = true;
-            });
+            await page.evaluate(
+                images => {
+                    globalThis.__pinefetchUi.frameImages[9030] = images.late;
+                    globalThis.__pinefetchUi.frameImages[6000] = images.current;
+                    globalThis.__pinefetchUi.holdFrame = true;
+                    globalThis.__pinefetchUi.ocrNodes = [...globalThis.document.querySelectorAll('#historyOcrText li')];
+                },
+                { late: videos[1].thumbnail, current: videos[0].thumbnail }
+            );
             await page.locator('.pinefetch-ocr-select').nth(2).click();
             await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseFrame));
             await page.locator('.pinefetch-ocr-select').nth(1).click();
             await page.locator('#historyOcrFrame').waitFor();
             await page.evaluate(() => globalThis.__pinefetchUi.releaseFrame());
-            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:04');
-            assert.equal(await page.locator('#historyOcrSelectedText').textContent(), 'Second text');
-            assert.equal(await page.locator('#historyOcrEntryCount').textContent(), '3');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:06');
+            assert.equal(await page.locator('#historyOcrFrame').getAttribute('src'), videos[0].thumbnail);
+            assert(
+                await page.evaluate(() =>
+                    [...globalThis.document.querySelectorAll('#historyOcrText li')].every(
+                        (node, index) => node === globalThis.__pinefetchUi.ocrNodes[index]
+                    )
+                )
+            );
+            assert.equal(
+                await page.locator('.pinefetch-ocr-result[aria-current="true"] .oj-text').textContent(),
+                'Second text'
+            );
+            assert.equal(await page.locator('#historyOcrResultCount').textContent(), '3 detected entries');
             assert(await page.locator('#historyOcrAnalyzed').textContent());
             assert(await page.locator('#historyOcrPreviousResult').isHidden());
             assert.equal(
@@ -1223,6 +1250,23 @@ try {
             assert(await page.locator('#historyOcrPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
             await page.screenshot({ path: `/tmp/pinefetch-ocr-frame-${engine.name()}.png` });
             await page.setViewportSize({ width: 1400, height: 960 });
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdFrame = true;
+                globalThis.__pinefetchUi.releaseFrame = null;
+            });
+            await page.locator('.pinefetch-ocr-select').nth(2).click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseFrame));
+            await page.locator('#historyOcrSearchInput').fill('No OCR matches');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '');
+            assert.equal(await page.locator('.pinefetch-ocr-result[aria-current="true"]').count(), 0);
+            assert(await page.locator('#historyOcrFrame').isHidden());
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseFrame());
+            assert(await page.locator('#historyOcrFrame').isHidden());
+            await page.locator('#historyOcrSearchInput').fill('second');
+            await page.locator('#historyOcrFrame').waitFor();
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:06');
+            await page.locator('#historyOcrSearchInput').fill('');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:06');
             await page.clock.install();
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.holdFrame = true;
@@ -1242,33 +1286,58 @@ try {
             assert(await page.locator('#historyOcrFrame').isHidden());
             await page.locator('.pinefetch-ocr-select').nth(1).click();
             await page.locator('#historyOcrFrame').waitFor();
-            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:04');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:06');
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.failNextOcrDelete = true;
             });
-            await page.locator('.pinefetch-ocr-delete').nth(1).click();
+            await page.locator('.pinefetch-ocr-delete').nth(1).focus();
+            await page.getByRole('tooltip', { name: 'Delete detected text', exact: true }).waitFor();
+            await page.keyboard.press('Escape');
+            await page.keyboard.press('Enter');
             await page.locator('#historyOcrActionNotice').waitFor();
             assert.equal(await page.locator('#historyOcrText li').count(), 3);
-            assert.equal(await page.locator('#historyOcrSelectedText').textContent(), 'Second text');
+            assert.equal(
+                await page.locator('.pinefetch-ocr-result[aria-current="true"] .oj-text').textContent(),
+                'Second text'
+            );
             await page.locator('.pinefetch-ocr-delete').nth(1).click();
             await page.waitForFunction(() => globalThis.document.querySelectorAll('#historyOcrText li').length === 2);
             assert.equal(await page.locator('#historyOcrResultCount').textContent(), '2 detected entries');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:09');
             await page.locator('#historyOcrCopyBtn').click();
             assert.doesNotMatch(await page.evaluate(() => globalThis.__pinefetchUi.copied), /Second text/);
             await page.locator('#historyOcrSearchInput').fill('second');
             assert.equal(await page.locator('#historyOcrResultCount').textContent(), '0 found');
             await page.locator('#historyOcrSearchInput').fill('');
+            await page.locator('.pinefetch-ocr-select').nth(1).click();
             await page.locator('.pinefetch-ocr-delete').first().click();
             await page.waitForFunction(() => globalThis.document.querySelectorAll('#historyOcrText li').length === 1);
             assert.equal(await page.locator('.pinefetch-ocr-select').textContent(), '00:00:09');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:09');
+            const groupDeletion = await page.evaluate(() =>
+                globalThis.__pinefetchUi.commands.findLast(call => call.command === 'delete_history_ocr_observation')
+            );
+            assert.equal(groupDeletion.args.wholeSegment, true);
+            assert.equal(groupDeletion.args.selection.observed_at_ms, 3020);
+            assert.deepEqual(
+                await page.evaluate(() =>
+                    globalThis.__pinefetchUi.ocrRecords['history-1'].segments.map(segment => segment.observed_at_ms)
+                ),
+                [[9030]]
+            );
+            await page.locator('#historyOcrCopyBtn').click();
+            assert.match(await page.evaluate(() => globalThis.__pinefetchUi.copied), /^\[00:00:09.030\]/);
+            assert.doesNotMatch(
+                await page.evaluate(() => globalThis.__pinefetchUi.copied),
+                /00:00:03|00:00:04|00:00:05/
+            );
             await closeDetails();
-            await openOcr('history-1');
-            await expectOcrStatus('OCR complete');
-            assert.equal(await page.locator('#historyOcrText li').count(), 1);
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.failNextFrame = true;
             });
-            await page.locator('.pinefetch-ocr-select').click();
+            await openOcr('history-1');
+            await expectOcrStatus('OCR complete');
+            assert.equal(await page.locator('#historyOcrText li').count(), 1);
             await page.waitForFunction(() =>
                 globalThis.document.querySelector('#historyOcrFrameStatus').textContent.includes('unavailable')
             );
@@ -1349,11 +1418,51 @@ try {
             await page.locator('#historyOverviewTab').click();
             await page.locator('#historyOcrTab').click();
             await page.waitForFunction(() => globalThis.document.querySelectorAll('#historyOcrText li').length === 100);
+            const pinnedBeforeScrolling = await pinnedOcrLayout();
+            await page.locator('#historyOcrListViewport').evaluate(el => {
+                el.scrollTop = 650;
+            });
+            assert.deepEqual(await pinnedOcrLayout(), pinnedBeforeScrolling);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.ocrNodes = [...globalThis.document.querySelectorAll('#historyOcrText li')];
+            });
+            await page.locator('.pinefetch-ocr-result .oj-text').nth(15).click();
+            const scrollBeforeSelection = await page.locator('#historyOcrListViewport').evaluate(el => el.scrollTop);
+            await page.locator('.pinefetch-ocr-result .oj-text').nth(16).click();
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:16');
+            assert.equal(
+                await page.locator('#historyOcrListViewport').evaluate(el => el.scrollTop),
+                scrollBeforeSelection
+            );
+            assert(
+                await page.evaluate(() =>
+                    [...globalThis.document.querySelectorAll('#historyOcrText li')].every(
+                        (node, index) => node === globalThis.__pinefetchUi.ocrNodes[index]
+                    )
+                )
+            );
+            await page.keyboard.press('ArrowDown');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:17');
+            await page.keyboard.press('ArrowUp');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:16');
+            assert.deepEqual(await pinnedOcrLayout(), pinnedBeforeScrolling);
+            await page.locator('.pinefetch-ocr-select').nth(99).click();
+            await page.keyboard.press('ArrowDown');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:01:40');
+            assert.equal(await page.locator('#historyOcrText li').count(), 151);
+            assert.deepEqual(await pinnedOcrLayout(), pinnedBeforeScrolling);
+            await closeDetails();
+            await openOcr('history-2');
+            await expectOcrStatus('OCR complete');
+            assert.equal(await page.locator('#historyOcrText li').count(), 100);
             await page.locator('#historyOcrLoadMoreBtn').click();
             assert.equal(await page.locator('#historyOcrText li').count(), 151);
             await page.locator('#historyOcrSearchInput').fill('entry 150');
             assert.equal(await page.locator('#historyOcrText li').count(), 1);
             assert.equal(await page.locator('#historyOcrLoadMoreBtn').isVisible(), false);
+            const filteredFrameTime = await page.locator('#historyOcrFrameTime').textContent();
+            await page.locator('#historyOcrSearchInput').press('ArrowUp');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), filteredFrameTime);
             await closeDetails();
 
             await openOcr('history-2', true);
@@ -1400,7 +1509,9 @@ try {
             });
             await expectOcrStatus('OCR interrupted');
             await page.waitForFunction(
-                () => globalThis.document.querySelector('#historyOcrEntryCount').textContent === '801'
+                () =>
+                    globalThis.document.querySelector('#historyOcrResultCount').textContent ===
+                    '801 detected entries · 100 shown'
             );
             assert(await page.locator('#historyOcrNotice').isVisible());
             assert(await page.locator('#historyOcrPreviousResult').isVisible());
@@ -1409,7 +1520,10 @@ try {
             assert.equal(await page.locator('#historyOcrResultCount').textContent(), '1 found');
             await page.locator('.pinefetch-ocr-select').click();
             await page.locator('#historyOcrFrame').waitFor();
-            assert.equal(await page.locator('#historyOcrSelectedText').textContent(), longOcrText);
+            assert.equal(
+                await page.locator('.pinefetch-ocr-result[aria-current="true"] .oj-text').textContent(),
+                longOcrText
+            );
             await checkOcrLayout('interrupted-long-text');
             await page.locator('#historyOcrCopyBtn').click();
             const copiedSavedResult = await page.evaluate(() => globalThis.__pinefetchUi.copied);
@@ -1426,14 +1540,39 @@ try {
             );
             await page.locator('#historyOcrLoadMoreBtn').click();
             assert.equal(await page.locator('#historyOcrText li').count(), 200);
-            await page.setViewportSize({ width: 800, height: 960 });
-            assert(await page.locator('#historyOcrPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
-            const stacked = await page.evaluate(() => {
-                const frame = globalThis.document.querySelector('.pinefetch-ocr-frame-stage').getBoundingClientRect();
-                const info = globalThis.document.querySelector('.pinefetch-ocr-preview-info').getBoundingClientRect();
-                return info.top >= frame.bottom && Math.abs(info.width - frame.width) < 1;
+            await checkOcrLayout('large-result');
+            const fixedLayout = await pinnedOcrLayout();
+            await page.locator('#historyOcrListViewport').evaluate(el => {
+                el.scrollTop = 1800;
             });
-            assert(stacked);
+            assert.deepEqual(await pinnedOcrLayout(), fixedLayout);
+            await page.screenshot({ path: `/tmp/pinefetch-ocr-review-scrolled-${engine.name()}.png` });
+            for (const height of [960, 720]) {
+                await page.setViewportSize({ width: 800, height });
+                const stacked = await page.evaluate(() => {
+                    const rect = selector => globalThis.document.querySelector(selector).getBoundingClientRect();
+                    const frame = rect('.pinefetch-ocr-frame-stage');
+                    const results = rect('#historyOcrResults');
+                    const list = rect('#historyOcrListViewport');
+                    const footer = rect('.pinefetch-ocr-analysis-info');
+                    const panel = globalThis.document.querySelector('#historyOcrPanel');
+                    return {
+                        stacked: results.top >= frame.bottom && Math.abs(results.width - frame.width) < 1,
+                        frameHeight: frame.height,
+                        listHeight: list.height,
+                        footerBottom: footer.bottom,
+                        panelBottom: panel.getBoundingClientRect().bottom,
+                        fits: panel.scrollWidth <= panel.clientWidth && panel.scrollHeight <= panel.clientHeight,
+                    };
+                });
+                assert(stacked.stacked);
+                assert(stacked.panelBottom <= height, JSON.stringify(stacked));
+                assert(stacked.frameHeight > 70, JSON.stringify(stacked));
+                assert(stacked.listHeight > 50, JSON.stringify(stacked));
+                assert(stacked.footerBottom <= stacked.panelBottom + 1, JSON.stringify(stacked));
+                assert(stacked.fits, JSON.stringify(stacked));
+                await page.screenshot({ path: `/tmp/pinefetch-ocr-review-narrow-800x${height}-${engine.name()}.png` });
+            }
             await page.setViewportSize({ width: 1400, height: 960 });
             await closeDetails();
 

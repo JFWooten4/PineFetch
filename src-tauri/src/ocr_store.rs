@@ -172,6 +172,23 @@ pub(crate) fn delete_observation(
     id: &str,
     selection: &OcrSelection,
 ) -> Result<OcrContent, String> {
+    delete_selection(db, id, selection, false)
+}
+
+pub(crate) fn delete_segment(
+    db: &Database,
+    id: &str,
+    selection: &OcrSelection,
+) -> Result<OcrContent, String> {
+    delete_selection(db, id, selection, true)
+}
+
+fn delete_selection(
+    db: &Database,
+    id: &str,
+    selection: &OcrSelection,
+    whole_segment: bool,
+) -> Result<OcrContent, String> {
     let conn = db.lock().map_err(|_| "SQLite lock poisoned")?;
     let tx = database::write_transaction(&conn)?;
     let content = read(&tx, id)?.ok_or("No saved OCR result is available.")?;
@@ -182,12 +199,16 @@ pub(crate) fn delete_observation(
     let mut segments = content
         .segments
         .ok_or("No saved OCR result is available.")?;
-    let segment = &mut segments[selection.segment_index];
-    segment
-        .observed_at_ms
-        .retain(|time| *time != selection.observed_at_ms);
-    if segment.observed_at_ms.is_empty() {
+    if whole_segment {
         segments.remove(selection.segment_index);
+    } else {
+        let segment = &mut segments[selection.segment_index];
+        segment
+            .observed_at_ms
+            .retain(|time| *time != selection.observed_at_ms);
+        if segment.observed_at_ms.is_empty() {
+            segments.remove(selection.segment_index);
+        }
     }
     let text = crate::ocr_rules::readable_text(&segments);
     let json = serde_json::to_string(&segments).map_err(|e| e.to_string())?;

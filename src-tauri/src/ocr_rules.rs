@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub(crate) const SAMPLE_INTERVAL_SECONDS: f64 = 1.0;
+pub(crate) const MIN_TEXT_CHARACTERS: usize = 4;
 pub(crate) const MAX_RESULT_BYTES: usize = 32 * 1024 * 1024;
 
 pub(crate) fn validate_ready(ready: &serde_json::Value) -> Result<(), String> {
@@ -85,7 +86,7 @@ impl SegmentBuilder {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            if text.is_empty() {
+            if text.chars().take(MIN_TEXT_CHARACTERS).count() < MIN_TEXT_CHARACTERS {
                 continue;
             }
             let found = self.previous.iter().copied().find(|index| {

@@ -303,8 +303,6 @@ export const createHistoryDetailsView = ({
         navigateToDetails(entryId);
         els.historyDetailsTitle.textContent = 'Video Details';
         els.historyDetailsSubtitle.textContent = '';
-        els.historyDetailsDate.textContent = '';
-        els.historyDetailsDownloadStatus.textContent = '';
         els.historyDetailsThumbnail.hidden = true;
         els.historyDetailsThumbnail.removeAttribute('src');
         els.historyDetailsHeader.classList.add('pinefetch-no-media');
@@ -328,11 +326,6 @@ export const createHistoryDetailsView = ({
             ]
                 .filter(Boolean)
                 .join(' · ');
-            els.historyDetailsDate.textContent =
-                formatDateTime(details.entry?.completed_at || details.entry?.created_at) || '';
-            els.historyDetailsDownloadStatus.textContent = details.output_file_available
-                ? 'Downloaded · File available'
-                : 'Saved · File missing';
             if (details.entry?.thumbnail) {
                 els.historyDetailsThumbnail.src = details.entry.thumbnail;
                 els.historyDetailsThumbnail.hidden = false;

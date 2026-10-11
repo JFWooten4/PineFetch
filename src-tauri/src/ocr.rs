@@ -785,6 +785,7 @@ pub(crate) fn analyze(
     }
     let mut settings = ready["settings"].clone();
     settings["sample_interval_seconds"] = serde_json::json!(ocr_rules::SAMPLE_INTERVAL_SECONDS);
+    settings["minimum_text_characters"] = serde_json::json!(ocr_rules::MIN_TEXT_CHARACTERS);
     settings["sampling"] = serde_json::json!("first frame, then first media PTS at least one second after previous selection; local file timeline");
     settings["frames_checked"] = serde_json::json!(frame_id);
     settings["video_duration_ms"] = serde_json::json!(duration_ms);

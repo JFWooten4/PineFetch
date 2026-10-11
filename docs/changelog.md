@@ -6,6 +6,7 @@
 - "Show saved videos by this creator" context menu
 - OCR analysis
 - search amount displayed in history
+- youtube playlist support
 
 # 2.2.2
 

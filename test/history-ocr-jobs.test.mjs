@@ -128,20 +128,46 @@ test('batched stored summaries hydrate a fresh session without fetching individu
     assert.equal(starts(), 0);
 });
 
-test('result observations are chronological and copying retains every precise timestamp', () => {
+test('consecutive OCR observations share one chronological entry and copying keeps precise timestamps', () => {
     const segments = [
-        { text: 'Repeat', observed_at_ms: [3020, 9000] },
-        { text: '<img src=x> stays text', observed_at_ms: [5000] },
+        { text: 'Repeat', observed_at_ms: [3020, 4030, 5040] },
+        { text: '<img src=x> stays text', observed_at_ms: [6000] },
+        { text: 'Repeat', observed_at_ms: [9000, 10010] },
     ];
     assert.deepEqual(
         ocrEntries(segments).map(entry => entry.time),
-        [3020, 5000, 9000]
+        [3020, 6000, 9000]
     );
-    assert.match(ocrCopyText(segments), /00:00:03.020, 00:00:09.000/);
+    assert.match(ocrCopyText(segments), /00:00:03.020, 00:00:04.030, 00:00:05.040/);
+    assert.match(ocrCopyText(segments), /00:00:09.000, 00:00:10.010/);
     assert.deepEqual(
         ocrEntries(segments).map(entry => entry.segmentIndex),
-        [0, 1, 0]
+        [0, 1, 2]
     );
     assert.deepEqual(ocrEntries(null, 'Legacy saved text'), [{ time: null, text: 'Legacy saved text' }]);
     assert.deepEqual(ocrEntries([], ''), []);
+});
+
+test('grouped OCR entries retain source indexes after sorting and preserve separate positions', () => {
+    const segments = [
+        { text: 'Later', observed_at_ms: [9000, 10000] },
+        { text: 'Same text', observed_at_ms: [4000, 3000, -1, NaN] },
+        { text: 'Same text', observed_at_ms: [3000, 4000] },
+        { text: '', observed_at_ms: [0] },
+        { text: 'Legacy segment', observed_at_ms: [] },
+    ];
+    assert.deepEqual(ocrEntries(segments), [
+        { time: 3000, text: 'Same text', segmentIndex: 1 },
+        { time: 3000, text: 'Same text', segmentIndex: 2 },
+        { time: 9000, text: 'Later', segmentIndex: 0 },
+        { time: null, text: 'Legacy segment', segmentIndex: 4 },
+    ]);
+    assert.deepEqual(segments[1].observed_at_ms.slice(0, 2), [4000, 3000]);
+});
+
+test('long consecutive OCR runs produce one entry without expanding every frame', () => {
+    const observed_at_ms = Array.from({ length: 150000 }, (_, index) => index * 1000);
+    assert.deepEqual(ocrEntries([{ text: 'Static caption', observed_at_ms }]), [
+        { time: 0, text: 'Static caption', segmentIndex: 0 },
+    ]);
 });

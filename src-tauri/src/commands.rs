@@ -272,8 +272,13 @@ pub(crate) fn delete_history_ocr_observation(
     state: State<AppState>,
     id: String,
     selection: crate::models::OcrSelection,
+    whole_segment: Option<bool>,
 ) -> Result<crate::models::OcrContent, String> {
-    crate::ocr_store::delete_observation(&state.db, &id, &selection)
+    if whole_segment.unwrap_or(false) {
+        crate::ocr_store::delete_segment(&state.db, &id, &selection)
+    } else {
+        crate::ocr_store::delete_observation(&state.db, &id, &selection)
+    }
 }
 
 #[tauri::command]

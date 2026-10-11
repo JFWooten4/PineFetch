@@ -8,18 +8,26 @@ starts analysis. **Start OCR Analysis**, **Run OCR Again**, **Retry Analysis** a
 **Cancel Analysis** is the only navigation-independent cancellation action.
 History preserves its query, filters, loaded entries and scroll position.
 The header displays the thumbnail during analysis and after completion.
-Detected observations are chronological, searchable locally and displayed in
-pages of 100. **Copy All Text** copies every observation's precise timestamps,
+Detected text is shown once per consecutive group, ordered by its first observed
+timestamp, searchable locally and displayed in pages of 100. Repeated text in
+adjacent sampled frames shares one entry; a later reappearance remains separate.
+The preview uses the group's first frame. Existing saved results use the same
+grouped display without a rerun. **Copy All Text** copies every observation's precise timestamps,
 including text excluded by the current search. All processing and persistence
 remain local; no player, cloud service or transcription engine is added.
 
 Selecting a timestamp or detected text shows its actual saved-video frame in the
-viewer above the results. The upper action bar contains the analysis action and
-**Copy All Text**. On desktop, the frame occupies about 64% of the viewer width;
-selected text, saved-result metadata, current job status and progress sit on the
-right. Narrow windows stack the columns. The OCR panel scrolls as one area, with
-the search and results immediately below the viewer. FFmpeg seeks on the same
-normalized local PTS timeline and
+left side of the viewer. The upper action bar contains the analysis action,
+explicit cancellation while running and **Copy All Text**. On desktop, the frame
+occupies about 55% of the width; the complete searchable OCR list occupies the
+right. Only the list scrolls, preserving the frame, search and compact analysis
+footer. Narrow windows stack the columns within the available workspace height.
+The timestamp sits directly below the frame; recognized text appears only in
+the result rows. Arrow keys navigate focused results and load the next batch
+when needed. Row selection updates in place without resetting the list's scroll.
+Search retains a matching selection, otherwise selects the first match, and
+clears the preview for an empty result. Late preview responses cannot override
+a newer selection or search. FFmpeg seeks on the same normalized local PTS timeline and
 verifies the extracted timestamp, including variable frame intervals and nonzero
 origins. Previews are bounded to 1280 × 720 and returned as PNG data URLs without
 writing frames to disk. Source SHA-256 is verified once per unchanged file identity;
@@ -32,10 +40,14 @@ SHA-256 compression is optimized in dev/test builds so large saved videos do not
 spend tens of seconds in an unoptimized hash loop before their first preview.
 The application itself keeps its normal debug build settings.
 
-Each observation has a **Delete** button. It removes only that text occurrence at
-its timestamp, retaining other observations of the same segment. Empty segments
-are removed; saved readable text, search, counts and copying update together.
-Deleting the last observation leaves a valid empty saved result. Deletion persists
+Each displayed group has a keyboard-accessible delete icon and tooltip. It atomically removes that segment
+and its observations, retaining later reappearances and text at other positions.
+Saved readable text, search, counts and copying update together; the deleted
+group does not reappear at its next timestamp. Deleting the selected group selects
+a remaining neighbor; deleting another group keeps the current selection.
+Deleting the last group leaves a
+valid empty saved result. The native command also retains single-observation
+deletion for callers omitting `wholeSegment`. Deletion persists
 across restart and is disabled during analysis. A later successful **Run OCR Again**
 replaces the edited result with newly recognized observations.
 
@@ -69,7 +81,11 @@ calculated from file numbers or an assumed frame rate. Cut-video times refer to
 the local cut alone. Sampling can miss brief text and does not prove exact
 display intervals.
 
-Whitespace alone is normalized. Exact text at comparable positions in consecutive
+Whitespace alone is normalized. New analyses discard recognized text shorter than
+four Unicode characters after whitespace normalization, before grouping or saving
+either the segments or readable text. This minimum is saved as
+`minimum_text_characters` in the analysis settings. Existing results are preserved.
+Exact text at comparable positions in consecutive
 sampled frames joins a segment (bounding-box intersection-over-union at least
 0.6). Missing observations break the sequence. Later reappearances, different
 positions, numbers, URLs, handles, punctuation and negations remain distinct.
@@ -223,6 +239,14 @@ independent full decode of synthetic VFR frames with a nonzero timestamp origin,
 then verifies changed-source and stale-selection rejection.
 Timeout regressions cover stalled probe/extraction tools, child cleanup and retry,
 as well as ending a stuck UI request and ignoring its late response.
+The two-column review workspace passes the complete check/build gates (52
+JavaScript and 218 Rust tests). Chromium/WebKit API fixtures cover 801 saved
+entries, incremental loading, full-result copying, in-place selection, independent
+list scrolling, keyboard navigation across batches, delete failures and neighbor
+selection, search-empty states and out-of-order frames. Visual/layout checks cover
+1000 × 960, 1600 × 1100 and 1000 × 720 desktop windows, plus stacked 800 × 960 and
+800 × 720 windows; search, frame and analysis information remain stationary while
+the result list scrolls.
 The unchanged native OCR engine was separately verified on macOS 26.7 arm64:
 real Vision revision 3 with `de-DE`/`en-US`, VFR times 0/1120/2400/3520 ms, a real
 Tauri app bundle, existing ad-hoc deep signing/strict verification, and the bundled

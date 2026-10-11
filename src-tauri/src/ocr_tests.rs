@@ -132,6 +132,62 @@ fn deleting_ocr_observations_preserves_other_times_and_rejects_stale_or_running_
 }
 
 #[test]
+fn deleting_ocr_groups_removes_the_run_atomically_and_preserves_later_reappearances() {
+    let db = db();
+    let mut saved = result("Repeated text");
+    saved.segments[0].observed_at_ms = vec![3020, 4030, 5040];
+    let mut later = saved.segments[0].clone();
+    later.observed_at_ms = vec![9030, 10040];
+    saved.segments.push(later);
+    saved.text = ocr_rules::readable_text(&saved.segments);
+    ocr_store::begin(&db, "video", "first").unwrap();
+    ocr_store::finish(&db, "video", "first", &saved).unwrap();
+    let original = ocr_store::get(&db, "video").unwrap().unwrap();
+    let selected = selection(&original, 0, 3020);
+    let mut invalid = selected.clone();
+    invalid.observed_at_ms = 8000;
+    assert!(ocr_store::delete_segment(&db, "video", &invalid).is_err());
+    ocr_store::begin(&db, "video", "rerun").unwrap();
+    assert!(ocr_store::delete_segment(&db, "video", &selected)
+        .unwrap_err()
+        .contains("finish"));
+    ocr_store::fail(&db, "video", "rerun", "cancelled", "Cancelled").unwrap();
+    db.lock().unwrap().execute_batch("CREATE TRIGGER reject_ocr_group_delete BEFORE UPDATE OF segments_json ON history_ocr BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END;").unwrap();
+    assert!(ocr_store::delete_segment(&db, "video", &selected).is_err());
+    assert_eq!(
+        ocr_store::get(&db, "video")
+            .unwrap()
+            .unwrap()
+            .result_revision,
+        original.result_revision
+    );
+    db.lock()
+        .unwrap()
+        .execute_batch("DROP TRIGGER reject_ocr_group_delete;")
+        .unwrap();
+    let edited = ocr_store::delete_segment(&db, "video", &selected).unwrap();
+    assert_eq!(edited.segments.as_ref().unwrap().len(), 1);
+    assert_eq!(
+        edited.segments.as_ref().unwrap()[0].observed_at_ms,
+        vec![9030, 10040]
+    );
+    assert_eq!(
+        edited.text.as_deref(),
+        Some("[00:00:09.030, 00:00:10.040] Repeated text")
+    );
+    assert_eq!(edited.result_created_at, original.result_created_at);
+    assert_eq!(edited.source_sha256, original.source_sha256);
+    assert_eq!(edited.engine_version, original.engine_version);
+    assert_ne!(edited.result_revision, original.result_revision);
+    assert!(ocr_store::delete_segment(&db, "video", &selected)
+        .unwrap_err()
+        .contains("changed"));
+    let empty = ocr_store::delete_segment(&db, "video", &selection(&edited, 0, 9030)).unwrap();
+    assert!(empty.segments.unwrap().is_empty());
+    assert_eq!(empty.text.as_deref(), Some(""));
+}
+
+#[test]
 fn integration_ocr_deleted_text_survives_reopening_without_a_schema_change() {
     let root = TempRoot::new("ocr-delete-store");
     let path = root.path("history.sqlite");
@@ -140,9 +196,12 @@ fn integration_ocr_deleted_text_survives_reopening_without_a_schema_change() {
     conn.execute("INSERT INTO history_entries (id,url,created_at) VALUES ('video','https://example.com/video',1)", []).unwrap();
     let db = Database::new(conn);
     ocr_store::begin(&db, "video", "first").unwrap();
-    ocr_store::finish(&db, "video", "first", &result("Unwanted OCR text")).unwrap();
+    let mut saved = result("Unwanted OCR text");
+    saved.segments[0].observed_at_ms = vec![3020, 4030, 5040];
+    saved.text = ocr_rules::readable_text(&saved.segments);
+    ocr_store::finish(&db, "video", "first", &saved).unwrap();
     let content = ocr_store::get(&db, "video").unwrap().unwrap();
-    ocr_store::delete_observation(&db, "video", &selection(&content, 0, 3020)).unwrap();
+    ocr_store::delete_segment(&db, "video", &selection(&content, 0, 3020)).unwrap();
     drop(db);
     let conn = Connection::open(&path).unwrap();
     database::initialize(&conn).unwrap();
@@ -276,6 +335,67 @@ fn integration_ocr_preview_matches_vfr_frames_with_a_nonzero_origin_and_detects_
 }
 
 #[test]
+fn short_ocr_text_is_filtered_before_grouping_and_persistence_using_unicode_characters() {
+    let mut builder = SegmentBuilder::default();
+    builder
+        .push(
+            1000,
+            [
+                "",
+                " \n\t ",
+                "A",
+                "AB",
+                "ABC",
+                " äöü ",
+                "😀😁😂",
+                " \t A \n B \t ",
+            ]
+            .into_iter()
+            .map(|text| observation(text, 0.1))
+            .collect(),
+        )
+        .unwrap();
+    assert!(builder.segments.is_empty());
+    let db = db();
+    let mut saved = result("");
+    saved.segments = builder.segments.clone();
+    saved.text = ocr_rules::readable_text(&saved.segments);
+    ocr_store::begin(&db, "video", "short-only").unwrap();
+    ocr_store::finish(&db, "video", "short-only", &saved).unwrap();
+    let empty = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(empty.text.as_deref(), Some(""));
+    assert!(empty.segments.unwrap().is_empty());
+
+    builder
+        .push(
+            2000,
+            ["ABCD", " äöüß ", "😀😁😂😃", "  Text \t hier  "]
+                .into_iter()
+                .map(|text| observation(text, 0.1))
+                .collect(),
+        )
+        .unwrap();
+    builder.push(3000, vec![observation("ABC", 0.1)]).unwrap();
+    builder.push(4000, vec![observation("ABCD", 0.1)]).unwrap();
+    saved.segments = builder.segments;
+    saved.text = ocr_rules::readable_text(&saved.segments);
+    ocr_store::begin(&db, "video", "filtered").unwrap();
+    ocr_store::finish(&db, "video", "filtered", &saved).unwrap();
+    let stored = ocr_store::get(&db, "video").unwrap().unwrap();
+    let segments = stored.segments.unwrap();
+    assert_eq!(
+        segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ABCD", "äöüß", "😀😁😂😃", "Text hier", "ABCD"]
+    );
+    assert_eq!(segments[0].observed_at_ms, vec![2000]);
+    assert_eq!(segments[4].observed_at_ms, vec![4000]);
+    assert_eq!(stored.text.as_deref(), Some(saved.text.as_str()));
+}
+
+#[test]
 fn grouping_preserves_positions_reappearances_numbers_and_single_frames() {
     let mut builder = SegmentBuilder::default();
     builder
@@ -296,10 +416,19 @@ fn grouping_preserves_positions_reappearances_numbers_and_single_frames() {
             ],
         )
         .unwrap();
-    builder.push(5040, vec![]).unwrap();
     builder
         .push(
-            6100,
+            5040,
+            vec![
+                observation("12 Kilometer", 0.1),
+                observation("13 Kilometer", 0.6),
+            ],
+        )
+        .unwrap();
+    builder.push(6060, vec![]).unwrap();
+    builder
+        .push(
+            7100,
             vec![
                 observation("12 Kilometer", 0.1),
                 observation("not 12 Kilometer!", 0.6),
@@ -307,12 +436,12 @@ fn grouping_preserves_positions_reappearances_numbers_and_single_frames() {
         )
         .unwrap();
     assert_eq!(builder.segments.len(), 5);
-    assert_eq!(builder.segments[0].observed_at_ms, vec![3020, 4030]);
+    assert_eq!(builder.segments[0].observed_at_ms, vec![3020, 4030, 5040]);
     assert_eq!(builder.segments[1].observed_at_ms, vec![3020]);
     assert_eq!(builder.segments[2].text, "13 Kilometer");
-    assert_eq!(builder.segments[3].observed_at_ms, vec![6100]);
+    assert_eq!(builder.segments[3].observed_at_ms, vec![7100]);
     assert!(ocr_rules::readable_text(&builder.segments)
-        .contains("[00:00:03.020, 00:00:04.030] 12 Kilometer"));
+        .contains("[00:00:03.020, 00:00:04.030, 00:00:05.040] 12 Kilometer"));
 }
 
 #[test]
@@ -520,13 +649,13 @@ fn integration_saved_ocr_and_history_summary_survive_reopening_schema_three() {
 fn cancellation_before_final_commit_and_storage_failure_cannot_report_success() {
     let db = db();
     ocr_store::begin(&db, "video", "old").unwrap();
-    ocr_store::finish(&db, "video", "old", &result("Old")).unwrap();
+    ocr_store::finish(&db, "video", "old", &result("Old result")).unwrap();
     let state = OcrState::default();
     ocr_store::begin(&db, "video", "cancel").unwrap();
     ocr::test_active(&state, progress("cancel"));
     state.cancel(&db, "video", "cancel").unwrap();
     assert_eq!(
-        ocr::finalize(&db, &state, Ok(result("New")), || Ok(()))
+        ocr::finalize(&db, &state, Ok(result("New result")), || Ok(()))
             .unwrap()
             .status,
         "cancelled"
@@ -536,12 +665,12 @@ fn cancellation_before_final_commit_and_storage_failure_cannot_report_success() 
         .unwrap()
         .text
         .unwrap()
-        .ends_with("Old"));
+        .ends_with("Old result"));
     let state = OcrState::default();
     ocr_store::begin(&db, "video", "disk").unwrap();
     ocr::test_active(&state, progress("disk"));
     db.lock().unwrap().execute_batch("CREATE TRIGGER fail_ocr BEFORE UPDATE OF text ON history_ocr BEGIN SELECT RAISE(ABORT,'synthetic disk failure'); END;").unwrap();
-    let event = ocr::finalize(&db, &state, Ok(result("New")), || Ok(())).unwrap();
+    let event = ocr::finalize(&db, &state, Ok(result("New result")), || Ok(())).unwrap();
     assert_eq!(event.status, "error");
     assert!(event.message.unwrap().contains("synthetic disk failure"));
     assert!(ocr_store::get(&db, "video")
@@ -549,7 +678,7 @@ fn cancellation_before_final_commit_and_storage_failure_cannot_report_success() 
         .unwrap()
         .text
         .unwrap()
-        .ends_with("Old"));
+        .ends_with("Old result"));
 }
 
 #[test]
@@ -750,7 +879,8 @@ fn integration_ocr_preview_timeout_reaps_tools_and_allows_retry() {
     let selected = selection(&content, 0, 1310);
     let normal = tools(&root, "exit 0");
     let hang = script(&root, "hung-tool", "exec /bin/sleep 60");
-    let preview = crate::ocr_preview::OcrPreviewState::with_timeout(Duration::from_secs(1));
+    // Allow concurrent test process startup while still bounding stalled tools.
+    let preview = crate::ocr_preview::OcrPreviewState::with_timeout(Duration::from_secs(3));
     let processes = crate::process::ProcessState::default();
     for (extractor, probe) in [(&normal.ffmpeg, &hang), (&hang, &normal.ffprobe)] {
         let started = Instant::now();
@@ -814,6 +944,7 @@ fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_
     );
     let settings: serde_json::Value = serde_json::from_str(&result.settings_json).unwrap();
     assert_eq!(settings["video_duration_ms"], 3500);
+    assert_eq!(settings["minimum_text_characters"], 4);
     assert_eq!(result.segments[0].observed_at_ms, vec![1310]);
     assert_eq!(
         result.source_sha256,
