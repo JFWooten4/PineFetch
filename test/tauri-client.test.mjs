@@ -9,6 +9,7 @@ const commands = {
     createLinkDumpSecret: 'create_link_dump_secret',
     deleteLinkDumpSecret: 'delete_link_dump_secret',
     enqueueDownload: 'enqueue_download',
+    enqueuePlaylist: 'enqueue_playlist',
     getConfig: 'get_config',
     getDownloadPresets: 'get_download_presets',
     getHistory: 'get_history',

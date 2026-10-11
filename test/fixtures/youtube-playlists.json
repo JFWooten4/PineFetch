@@ -1,0 +1,30 @@
+{
+    "valid": [
+        ["https://www.youtube.com/playlist?list=PL_test-12", "PL_test-12"],
+        [" https://youtube.com/playlist?list=PL_test-12&si=share ", "PL_test-12"],
+        ["https://www.youtube.com/watch?v=abcdefghijk&list=PL_test-12&index=7&t=90", "PL_test-12"],
+        ["https://youtu.be/abcdefghijk?list=PL_test-12&t=60", "PL_test-12"],
+        ["https://music.youtube.com/playlist?list=OLAK5uy_test", "OLAK5uy_test"],
+        ["https://M.YOUTUBE.COM./playlist?list=PL%2Dtest_12", "PL-test_12"],
+        ["https://www.youtube.com/watch?v=abcdefghijk&list=RDabcdefghijk", "RDabcdefghijk"]
+    ],
+    "invalid": [
+        "https://youtube.com/playlist",
+        "https://youtube.com/playlist?list=",
+        "https://youtube.com/playlist?list=PL%20test",
+        "https://youtube.com/playlist?list=PL%26test",
+        "https://youtube.com/playlist?list=&list=PL_valid",
+        "https://youtube.com/watch?v=abcdefghijk",
+        "https://youtube.com/channel/channel?list=PL_test",
+        "https://youtu.be/?list=PL_test",
+        "https://youtu.be/video/other?list=PL_test",
+        "https://youtube.com.evil.example/playlist?list=PL_test",
+        "https://notyoutube.com/playlist?list=PL_test",
+        "https://example.com/youtube.com/playlist?list=PL_test",
+        "https://youtube.com@evil.example/playlist?list=PL_test",
+        "https://user:password@youtube.com/playlist?list=PL_test",
+        "https://youtube.com:2255/playlist?list=PL_test",
+        "file:///playlist?list=PL_test",
+        "not a URL"
+    ]
+}

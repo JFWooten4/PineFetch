@@ -21,6 +21,7 @@ No account. No cloud. Your files stay on your machine.
 - Create local transcripts with Whisper
 - Generate transcripts with timestamps
 - Queue multiple downloads
+- Paste YouTube playlist links to add all available videos to the queue
 - Import lists of links from TXT files
 - Keep a local download history
 - Inspect stored metadata, transcripts and captions from History
@@ -55,6 +56,13 @@ You can choose between faster or more accurate Whisper models in Settings.
 ## Queue, history and batch imports
 
 Drop in one link or queue a whole list.
+
+Pasting a YouTube playlist link into the Download URL field automatically adds its
+available videos as separate jobs, in playlist order. Video links containing
+`list=` and Magic Import work too. Each job uses the selected format and download
+folder; queue auto-start and pause settings still apply. Private, deleted and
+invalid entries are skipped with a count. A video-specific timestamp in the pasted
+playlist link does not trim every video in the playlist.
 
 PineFetch can import YouTube, TikTok and Instagram URLs from a simple TXT file and process them one after another.
 

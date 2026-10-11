@@ -1,5 +1,26 @@
 const timestampParamNames = new Set(['t', 'start', 'start_time', 'time_continue']);
 
+const normalizeYouTubePlaylistUrl = input => {
+    if (!isValidHttpUrl(input) || detectPlatform(input) !== 'youtube') return null;
+    try {
+        const parsed = new URL(input.trim());
+        const host = parsed.hostname.replace(/\.$/, '').toLowerCase();
+        const youtube = host === 'youtube.com' || host.endsWith('.youtube.com');
+        const short = host === 'youtu.be';
+        if (parsed.username || parsed.password || (parsed.port && !['80', '443'].includes(parsed.port))) return null;
+        if (
+            !(youtube && ['/playlist', '/watch'].includes(parsed.pathname)) &&
+            !(short && /^\/[^/]+$/.test(parsed.pathname))
+        )
+            return null;
+        const list = parsed.searchParams.get('list');
+        if (!list || !/^[A-Za-z0-9_-]+$/.test(list)) return null;
+        return `https://www.youtube.com/playlist?list=${list}`;
+    } catch {
+        return null;
+    }
+};
+
 const normalizePositiveTimestamp = seconds => {
     const value = Number(seconds);
     return Number.isFinite(value) && value > 0 ? value : null;
@@ -293,6 +314,7 @@ export {
     extractUrlStartTimestamp,
     isValidHttpUrl,
     normalizeTxtImportUrl,
+    normalizeYouTubePlaylistUrl,
     parseTxtImportLinks,
     resolveYouTubeThumbnail,
 };

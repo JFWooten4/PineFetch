@@ -1,13 +1,22 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
     detectPlatform,
     extractUrlStartTimestamp,
     isValidHttpUrl,
     normalizeTxtImportUrl,
+    normalizeYouTubePlaylistUrl,
     parseTxtImportLinks,
     resolveYouTubeThumbnail,
 } from '../src/url-utils.js';
+
+test('YouTube playlist links match the native import boundary and drop video-specific parameters', () => {
+    const cases = JSON.parse(readFileSync(new URL('./fixtures/youtube-playlists.json', import.meta.url), 'utf8'));
+    for (const [url, id] of cases.valid)
+        assert.equal(normalizeYouTubePlaylistUrl(url), `https://www.youtube.com/playlist?list=${id}`, url);
+    for (const url of cases.invalid) assert.equal(normalizeYouTubePlaylistUrl(url), null, url);
+});
 
 describe('HTTP URL validation and platform boundaries', () => {
     test('accepts HTTP(S) and rejects malformed URLs and other schemes', () => {

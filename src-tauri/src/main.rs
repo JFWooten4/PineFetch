@@ -62,6 +62,7 @@ mod tests;
 mod url_rules;
 mod video_urls;
 mod worker;
+mod youtube_playlist;
 mod yt_dlp;
 
 fn main() {
@@ -135,6 +136,7 @@ fn main() {
             commands::pause_queue,
             commands::resume_queue,
             commands::enqueue_download,
+            commands::enqueue_playlist,
             commands::cancel_download,
             commands::get_history,
             commands::get_history_stats,

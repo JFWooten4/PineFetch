@@ -6,7 +6,7 @@
 - "Show saved videos by this creator" context menu
 - OCR analysis
 - search amount displayed in history
-- youtube playlist support
+- YouTube playlist support: pasting a playlist automatically queues its available videos in order
 
 # 2.2.2
 

@@ -13,6 +13,7 @@ export const createTauriClient = tauri => {
         createLinkDumpSecret: args => invoke('create_link_dump_secret', args),
         deleteLinkDumpSecret: args => invoke('delete_link_dump_secret', args),
         enqueueDownload: args => invoke('enqueue_download', args),
+        enqueuePlaylist: args => invoke('enqueue_playlist', args),
         getConfig: args => invoke('get_config', args),
         getDownloadPresets: args => invoke('get_download_presets', args),
         getHistory: args => invoke('get_history', args),

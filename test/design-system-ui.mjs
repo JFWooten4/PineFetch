@@ -19,7 +19,7 @@ const videos = await Promise.all(
     }))
 );
 
-const installUiResponses = fallbackFrame => {
+const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
     const invoke = globalThis.__TAURI__.core.invoke;
     const listen = globalThis.__TAURI__.event.listen;
     const listeners = new Map();
@@ -45,6 +45,11 @@ const installUiResponses = fallbackFrame => {
         frameImages: {},
         failNextOcrDelete: false,
         failNextModelSave: false,
+        holdPlaylist: false,
+        releasePlaylist: null,
+        failNextPlaylist: false,
+        playlistVideos,
+        clipboard: '',
         releasePresets,
         setHistorySources: sources => {
             historySources = [...sources];
@@ -71,6 +76,34 @@ const installUiResponses = fallbackFrame => {
     };
     globalThis.__TAURI__.core.invoke = async (command, args = {}) => {
         ui.commands.push({ command, args });
+        if (command === 'read_clipboard_text') return ui.clipboard;
+        if (command === 'enqueue_playlist') {
+            if (ui.holdPlaylist) {
+                ui.holdPlaylist = false;
+                await new Promise(resolve => {
+                    ui.releasePlaylist = resolve;
+                });
+            }
+            if (ui.failNextPlaylist) {
+                ui.failNextPlaylist = false;
+                throw new Error('Fixture playlist is unavailable.');
+            }
+            const jobs = [];
+            for (const video of ui.playlistVideos) {
+                const job = {
+                    ...args.request,
+                    url: video.url,
+                    title: video.title,
+                    thumbnail: video.thumbnail,
+                    duration_seconds: video.duration,
+                    uploader: video.uploader,
+                    cut_start_time: null,
+                };
+                const id = await invoke('enqueue_download', { request: job });
+                jobs.push({ ...job, id });
+            }
+            return { title: 'Fixture playlist', jobs, skipped_count: 1 };
+        }
         if (command === 'get_download_presets') await presetsReady;
         if (command === 'get_config') {
             config ||= {
@@ -249,7 +282,7 @@ try {
                 return route.abort('blockedbyclient');
             });
             await context.addInitScript({
-                content: `(${installScreenshotBridge.toString()})(${JSON.stringify({ videos, version })}); (${installUiResponses.toString()})(${JSON.stringify(videos[0].thumbnail)});`,
+                content: `(${installScreenshotBridge.toString()})(${JSON.stringify({ videos, version })}); (${installUiResponses.toString()})(${JSON.stringify({ fallbackFrame: videos[0].thumbnail, playlistVideos: videos })});`,
             });
             const page = await context.newPage();
             const errors = [];
@@ -1787,6 +1820,127 @@ try {
             await page.waitForFunction(() => !globalThis.document.getElementById('saveCaptions').disabled);
             assert.equal(await setting.isChecked(), false);
 
+            // Playlist paste/import expands into independent jobs without requiring Queue.
+            await page.locator('#viewDownloadBtn').click();
+            await selectPreset('audio_opus', 'Audio only (opus)', false);
+            const playlistCalls = () =>
+                page.evaluate(
+                    () => globalThis.__pinefetchUi.commands.filter(call => call.command === 'enqueue_playlist').length
+                );
+            const playlistInput = page.locator('#urlInput');
+            const playlistStatus = page.locator('#playlistImportStatus');
+            let playlistQueueCount = await page.locator('.pinefetch-queue-item').count();
+            const beforePlaylist = await playlistCalls();
+            await page.locator('#outputDir').fill('/Users/demo/Downloads/Playlist target');
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdPlaylist = true;
+            });
+            const playlistLink = `${videos[0].url}&list=PL_test&t=90`;
+            await playlistInput.fill(playlistLink);
+            await page.waitForFunction(
+                count =>
+                    globalThis.__pinefetchUi.commands.filter(call => call.command === 'enqueue_playlist').length ===
+                    count,
+                beforePlaylist + 1
+            );
+            assert.match(await playlistStatus.textContent(), /Loading YouTube playlist/);
+            assert(await page.locator('#startDownloadBtn').isDisabled());
+            await playlistInput.press('Enter');
+            await playlistInput.dispatchEvent('input');
+            await page.waitForTimeout(750);
+            assert.equal(await playlistCalls(), beforePlaylist + 1);
+            assert.equal(await page.locator('.pinefetch-queue-item').count(), playlistQueueCount);
+            await page.evaluate(() => globalThis.__pinefetchUi.releasePlaylist());
+            playlistQueueCount += videos.length;
+            await page.waitForFunction(
+                count => globalThis.document.querySelectorAll('.pinefetch-queue-item').length === count,
+                playlistQueueCount
+            );
+            assert.match(await playlistStatus.textContent(), /Added 2 playlist videos.*1 unavailable/);
+            assert.equal(await playlistInput.inputValue(), '');
+            assert(await page.locator('#startDownloadBtn').isEnabled());
+            const playlistRequest = await page.evaluate(
+                () =>
+                    globalThis.__pinefetchUi.commands.filter(call => call.command === 'enqueue_playlist').at(-1).args
+                        .request
+            );
+            assert.equal(playlistRequest.url, 'https://www.youtube.com/playlist?list=PL_test');
+            assert.equal(playlistRequest.output_dir, '/Users/demo/Downloads/Playlist target');
+            assert.equal(playlistRequest.audio_format, 'opus');
+            assert.equal(playlistRequest.cut_start_time, null);
+            assert.equal(
+                await page.evaluate(() => globalThis.__pinefetchScreenshot.queuedUrls.slice(-2).join('\n')),
+                videos.map(video => video.url).join('\n')
+            );
+            await page.screenshot({ path: `/tmp/pinefetch-playlist-import-${engine.name()}.png` });
+
+            // A late import may add its accepted playlist but cannot clear newer composer input.
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdPlaylist = true;
+            });
+            await playlistInput.fill('https://youtube.com/playlist?list=PL_late');
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releasePlaylist));
+            await page.waitForFunction(
+                count =>
+                    globalThis.__pinefetchUi.commands.filter(call => call.command === 'enqueue_playlist').length ===
+                    count,
+                beforePlaylist + 2
+            );
+            await playlistInput.fill(videos[0].url);
+            await page.evaluate(() => globalThis.__pinefetchUi.releasePlaylist());
+            playlistQueueCount += videos.length;
+            await page.waitForFunction(
+                count => globalThis.document.querySelectorAll('.pinefetch-queue-item').length === count,
+                playlistQueueCount
+            );
+            assert.equal(await playlistInput.inputValue(), videos[0].url);
+            await playlistInput.press('Escape');
+
+            // Failed and empty imports leave the link available for a deliberate retry.
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failNextPlaylist = true;
+            });
+            await playlistInput.fill('https://youtube.com/playlist?list=PL_failed');
+            await page.waitForFunction(() =>
+                globalThis.document.querySelector('#playlistImportStatus').textContent.includes('Could not load')
+            );
+            assert.equal(await page.locator('.pinefetch-queue-item').count(), playlistQueueCount);
+            assert.equal(await playlistInput.inputValue(), 'https://youtube.com/playlist?list=PL_failed');
+            await page.locator('#startDownloadBtn').click();
+            playlistQueueCount += videos.length;
+            await page.waitForFunction(
+                count => globalThis.document.querySelectorAll('.pinefetch-queue-item').length === count,
+                playlistQueueCount
+            );
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.playlistVideos = [];
+            });
+            await playlistInput.fill('https://youtube.com/playlist?list=PL_empty');
+            await page.waitForFunction(() =>
+                globalThis.document.querySelector('#playlistImportStatus').textContent.includes('No available videos')
+            );
+            assert.equal(await page.locator('.pinefetch-queue-item').count(), playlistQueueCount);
+            assert.equal(await playlistInput.inputValue(), 'https://youtube.com/playlist?list=PL_empty');
+            await playlistInput.press('Escape');
+            await page.evaluate(entries => {
+                const ui = globalThis.__pinefetchUi;
+                ui.playlistVideos = entries;
+                ui.clipboard = 'https://youtube.com/playlist?list=PL_clipboard';
+            }, videos);
+            await page.locator('#magicImportTrigger').click();
+            playlistQueueCount += videos.length;
+            await page.waitForFunction(
+                count => globalThis.document.querySelectorAll('.pinefetch-queue-item').length === count,
+                playlistQueueCount
+            );
+            assert.equal(await playlistInput.inputValue(), '');
+            const afterPlaylists = await playlistCalls();
+            await playlistInput.fill(videos[1].url);
+            await page.waitForTimeout(750);
+            assert.equal(await playlistCalls(), afterPlaylists);
+            assert.equal(await page.locator('.pinefetch-queue-item').count(), playlistQueueCount);
+            assert.equal(await playlistInput.inputValue(), videos[1].url);
+
             // Verify desktop minimum size and compact browser layout after font loading.
             for (const width of [1000, 520]) {
                 await page.setViewportSize({ width, height: 960 });
@@ -1799,7 +1953,7 @@ try {
             assert(loadedFonts.some(url => url.includes('fa-solid')));
             assert.deepEqual(errors, []);
             console.log(
-                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, history filters/creator/reset, transcription model/save rollback, menus, tabs, full-container details, OCR background navigation/search, preserved History state, confirmations and switches passed.`
+                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, playlist auto-import/retry/deduplication/clipboard, history filters/creator/reset, transcription model/save rollback, menus, tabs, full-container details, OCR background navigation/search, preserved History state, confirmations and switches passed.`
             );
         } finally {
             await browser.close();

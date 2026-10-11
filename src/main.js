@@ -20,6 +20,7 @@ import {
     extractUrlStartTimestamp,
     isValidHttpUrl,
     normalizeTxtImportUrl,
+    normalizeYouTubePlaylistUrl,
     parseTxtImportLinks,
     resolveYouTubeThumbnail,
 } from './url-utils.js';
@@ -34,6 +35,7 @@ const els = Object.seal({
     startDownloadBtn: document.getElementById('startDownloadBtn'),
     importTxtBtn: document.getElementById('importTxtBtn'),
     txtImportStatus: document.getElementById('txtImportStatus'),
+    playlistImportStatus: document.getElementById('playlistImportStatus'),
     pickDirBtn: document.getElementById('pickDirBtn'),
     settingsSaveStatus: document.getElementById('settingsSaveStatus'),
     notificationsEnabled: document.getElementById('notificationsEnabled'),
@@ -280,6 +282,8 @@ let logDomDirty = false;
 let settingsLogRenderReady = false;
 let viewActivationId = 0;
 let clearQueueInFlight = false;
+const playlistImports = new Map();
+let playlistImportSequence = 0;
 
 const formatCutStartLabel = seconds => {
     if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return null;
@@ -367,7 +371,8 @@ const tryMagicImport = async () => {
         renderInfo();
         setInfoBadge('Loading...');
         els.urlInput.focus();
-        void loadInfo();
+        if (normalizeYouTubePlaylistUrl(clipboardText)) void enqueueDownload();
+        else void loadInfo();
     } catch {
         // Ignore clipboard read failures; magic import is best-effort.
     } finally {
@@ -992,6 +997,10 @@ const loadInfo = async () => {
         shakeUrlInput();
         return;
     }
+    if (normalizeYouTubePlaylistUrl(url)) {
+        await enqueueDownload();
+        return;
+    }
     if (loadInfoInFlight) {
         loadInfoPending = true;
         return;
@@ -1028,7 +1037,7 @@ const loadInfo = async () => {
         loadInfoInFlight = false;
         els.loadInfoBtn.classList.remove('oj-button-loading');
         els.loadInfoBtn.removeAttribute('aria-busy');
-        els.loadInfoBtn.disabled = false;
+        els.loadInfoBtn.disabled = playlistImports.size > 0;
 
         const nextUrl = els.urlInput.value.trim();
         const inputChanged = nextUrl !== requestUrl;
@@ -1048,6 +1057,113 @@ const loadInfo = async () => {
     }
 };
 
+const playlistRequest = (url, preset) => ({
+    url,
+    format: preset.format,
+    output_dir: els.outputDir.value.trim() || null,
+    extract_audio: preset.extractAudio,
+    audio_format: preset.audioFormat,
+    transcribe_text: preset.transcribeText,
+    transcribe_timestamps: preset.transcribeTimestamps,
+    cut_at_timestamp_enabled: Boolean(els.cutAtTimestampEnabled.checked),
+    cut_start_time: null,
+    filename_suffix: preset.filenameSuffix,
+    title: null,
+    uploader: null,
+    thumbnail: null,
+    upload_date: null,
+    timestamp: null,
+    duration_seconds: null,
+});
+
+const renderPlaylistBusy = () => {
+    const busy = playlistImports.size > 0;
+    els.startDownloadBtn.disabled = busy || !presets.best;
+    els.startDownloadBtn.classList.toggle('oj-button-loading', busy);
+    els.startDownloadBtn.setAttribute('aria-busy', String(busy));
+    els.loadInfoBtn.disabled = busy || loadInfoInFlight;
+};
+
+const enqueuePlaylistForUrl = (url, presetKey, options = {}) => {
+    const playlistUrl = normalizeYouTubePlaylistUrl(url);
+    if (playlistImports.has(playlistUrl)) return playlistImports.get(playlistUrl);
+    const sequence = ++playlistImportSequence;
+    const showStatus = (message, error = false) => {
+        if (sequence !== playlistImportSequence) return;
+        els.playlistImportStatus.hidden = false;
+        els.playlistImportStatus.textContent = message;
+        els.playlistImportStatus.classList.toggle('oj-status-error', error);
+    };
+    showStatus('Loading YouTube playlist…');
+    if (els.urlInput.value.trim() === url) {
+        state.info = null;
+        state.infoUrl = null;
+        renderInfo();
+    }
+    const pending = (async () => {
+        try {
+            await initialization;
+            const preset = presets[presetKey] || presets.best;
+            if (!preset) throw new Error('Download formats are unavailable.');
+            const request = playlistRequest(playlistUrl, preset);
+            await settings.waitForPendingSave();
+            const result = await api.enqueuePlaylist({ request });
+            for (const job of result.jobs) {
+                if (state.suppressedJobIds.has(job.id)) continue;
+                const existing = state.jobs.get(job.id);
+                const thumbnail = job.thumbnail || resolveYouTubeThumbnail(job.url);
+                updateJob(job.id, {
+                    url: job.url,
+                    label: job.title || job.url,
+                    thumbnail,
+                    state: existing?.state || 'queued',
+                    outputPath: existing?.outputPath || null,
+                    previewResolved: Boolean(thumbnail),
+                    previewLoading: false,
+                    percent: existing?.percent ?? 0,
+                    speed: existing?.speed || '-',
+                    eta: existing?.eta || '-',
+                    formatLabel: preset.queueLabel,
+                    cutStartTime: job.cut_start_time,
+                });
+                maybeHydrateQueueThumbnail(job.id);
+            }
+            const count = result.jobs.length;
+            const skipped = result.skipped_count
+                ? ` ${pluralize(result.skipped_count, 'unavailable entry', 'unavailable entries')} skipped.`
+                : '';
+            const message = count
+                ? `Added ${count.toLocaleString()} playlist videos to the queue.${skipped}`
+                : `No available videos found in this playlist.${skipped}`;
+            showStatus(message, count === 0);
+            appendLog(`[playlist] ${message}`, count === 0);
+            if (count) {
+                void settings.cacheLastDownloadedUrl(url);
+                if (!options.preserveComposerState && els.urlInput.value.trim() === url) {
+                    els.urlInput.value = '';
+                    state.info = null;
+                    state.infoUrl = null;
+                    updateDownloadOptionHints();
+                    renderInfo();
+                    setInfoBadge('Idle');
+                    els.urlInput.focus({ preventScroll: true });
+                }
+            }
+            return result;
+        } catch (error) {
+            showStatus('Could not load the playlist. Check the link and try again.', true);
+            appendLog(`[playlist] ${error}`, true);
+            return null;
+        } finally {
+            playlistImports.delete(playlistUrl);
+            renderPlaylistBusy();
+        }
+    })();
+    playlistImports.set(playlistUrl, pending);
+    renderPlaylistBusy();
+    return pending;
+};
+
 const enqueueDownloadForUrl = async (url, presetKey, options = {}) => {
     if (!url) return null;
     if (!api.available) return null;
@@ -1055,6 +1171,7 @@ const enqueueDownloadForUrl = async (url, presetKey, options = {}) => {
         shakeUrlInput();
         return null;
     }
+    if (normalizeYouTubePlaylistUrl(url)) return enqueuePlaylistForUrl(url, presetKey, options);
 
     const preset = presets[presetKey] || presets.best;
     if (!preset) {
@@ -1175,6 +1292,7 @@ const removeJobFromQueue = async job => {
 
 const enqueueDownload = async () => {
     const url = els.urlInput.value.trim();
+    await initialization;
     const presetKey = getSelectedPresetKey();
     await enqueueDownloadForUrl(url, presetKey);
 };
@@ -1461,6 +1579,10 @@ const bindEvents = () => {
         urlInputDebounceTimer = setTimeout(() => {
             urlInputDebounceTimer = null;
             if (!canLoadInfoForUrl(els.urlInput.value.trim())) return;
+            if (normalizeYouTubePlaylistUrl(els.urlInput.value.trim())) {
+                void enqueueDownload();
+                return;
+            }
             setInfoBadge('Loading...');
             void loadInfo();
         }, 600);
@@ -1731,4 +1853,4 @@ const init = async () => {
     scheduleQueueRender();
 };
 
-init();
+const initialization = init();

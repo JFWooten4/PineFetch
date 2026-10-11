@@ -406,6 +406,38 @@ pub(crate) fn enqueue_download(
 }
 
 #[tauri::command]
+pub(crate) async fn enqueue_playlist(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: DownloadRequest,
+) -> Result<crate::youtube_playlist::PlaylistQueueResult, String> {
+    let url = crate::youtube_playlist::normalize_playlist_url(&request.url)
+        .ok_or("Enter a valid YouTube playlist link.")?;
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| "Config lock poisoned")?
+        .clone();
+    let output_dir = crate::runtime::resolve_output_dir(&state.config, request.output_dir.clone())?;
+    let yt_dlp = resolve_yt_dlp(&app, &state.config)?;
+    let deno = resolve_deno_executable(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let playlist = crate::youtube_playlist::load_playlist(
+            &yt_dlp,
+            deno.as_deref(),
+            &url,
+            &state.processes,
+        )?;
+        let result = crate::youtube_playlist::build_jobs(request, playlist, &config, output_dir);
+        crate::worker::enqueue_download_jobs(&app, &state, result.jobs.clone())?;
+        Ok::<_, String>(result)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+#[tauri::command]
 pub(crate) fn cancel_download(
     app: AppHandle,
     state: State<AppState>,
