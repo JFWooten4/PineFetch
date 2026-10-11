@@ -100,9 +100,11 @@ origins, including Matroska end-time tags. History's online duration is not used
 The UI displays **Video time HH:MM:SS / HH:MM:SS** without milliseconds,
 **Frames checked / total**, the entry's thumbnail and a determinate bar based
 on media time divided by local video duration. The frame total initially uses
-`ceil(duration / sample interval)` and is marked **≈**, since actual sampling
-can differ with variable timestamps or gaps. Extraction's final count replaces
-the estimate. The bar stays below 100% during final source checks and saving;
+`ceil(duration / sample interval)`; actual sampling can differ with variable
+timestamps or gaps. Extraction's final count replaces the estimate. Counters
+use monospaced digits and reserve widths from the full duration and total's
+digit count. Widths do not shrink when extraction supplies the final total.
+The bar stays below 100% during final source checks and saving;
 the status reads **Finishing OCR…**. Missing duration keeps the bar
 indeterminate and unknown totals are shown explicitly. Missing or failed
 thumbnails do not reserve an empty image column.

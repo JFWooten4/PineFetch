@@ -30,6 +30,9 @@ export const createHistoryOcrView = ({ els, api, appendLog }) => {
         revision: 0,
         content: undefined,
         progress: null,
+        layoutAttempt: null,
+        timeCharacters: 8,
+        frameCharacters: 1,
         disposed: false,
     };
     let unsubscribe;
@@ -62,12 +65,34 @@ export const createHistoryOcrView = ({ els, api, appendLog }) => {
         } else {
             els.historyOcrProgress.removeAttribute('value');
         }
-        els.historyOcrProgressText.textContent =
-            running && (hasDuration || progress?.frames_checked)
-                ? `Video time ${formatMediaTime(observedTime)} / ${hasDuration ? formatMediaTime(duration) : 'Unknown'} · Frames ${progress?.frames_checked || 0} / ${hasTotalFrames ? `${progress.total_frames_is_estimate ? '≈' : ''}${totalFrames}` : 'Unknown'}`
-                : running
-                  ? 'Preparing the saved video…'
-                  : '';
+        const showCounters = running && (hasDuration || progress?.frames_checked > 0);
+        els.historyOcrPreparing.hidden = !running || showCounters;
+        els.historyOcrProgressText.hidden = !showCounters;
+        els.historyOcrProgress.setAttribute(
+            'aria-describedby',
+            showCounters ? 'historyOcrProgressText' : 'historyOcrPreparing'
+        );
+        if (running && state.layoutAttempt !== progress?.attempt_id) {
+            state.layoutAttempt = progress?.attempt_id;
+            state.timeCharacters = 8;
+            state.frameCharacters = 1;
+        }
+        if (showCounters) {
+            const time = formatMediaTime(observedTime);
+            const timeTotal = hasDuration ? formatMediaTime(duration) : 'Unknown';
+            const frames = String(progress?.frames_checked || 0);
+            const framesTotal = hasTotalFrames ? String(totalFrames) : 'Unknown';
+            // Reserve the full counter widths up front. Keep them if the final
+            // extracted total is shorter than the initial duration-based total.
+            state.timeCharacters = Math.max(state.timeCharacters, time.length, timeTotal.length);
+            state.frameCharacters = Math.max(state.frameCharacters, frames.length, framesTotal.length);
+            els.historyOcrProgressText.style.setProperty('--pinefetch-ocr-time-width', `${state.timeCharacters}ch`);
+            els.historyOcrProgressText.style.setProperty('--pinefetch-ocr-frame-width', `${state.frameCharacters}ch`);
+            els.historyOcrTime.textContent = time;
+            els.historyOcrTimeTotal.textContent = timeTotal;
+            els.historyOcrFrames.textContent = frames;
+            els.historyOcrFramesTotal.textContent = framesTotal;
+        }
         const thumbnail = running && !state.thumbnailFailed ? state.entry?.thumbnail : null;
         els.historyOcrThumbnail.hidden = !thumbnail;
         els.historyOcrAnalysis.classList.toggle('pinefetch-no-media', !thumbnail);
@@ -94,6 +119,9 @@ export const createHistoryOcrView = ({ els, api, appendLog }) => {
         state.revision += 1;
         state.content = undefined;
         state.progress = null;
+        state.layoutAttempt = null;
+        state.timeCharacters = 8;
+        state.frameCharacters = 1;
         render();
     };
     const load = async () => {

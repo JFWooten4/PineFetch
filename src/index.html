@@ -788,7 +788,25 @@
                                             aria-describedby="historyOcrProgressText"
                                             hidden
                                         ></progress>
-                                        <p id="historyOcrProgressText" class="oj-muted"></p>
+                                        <p id="historyOcrPreparing" class="oj-muted" hidden>
+                                            Preparing the saved video…
+                                        </p>
+                                        <p id="historyOcrProgressText" class="oj-muted" hidden>
+                                            <span class="pinefetch-ocr-progress-group"
+                                                >Video time
+                                                <span id="historyOcrTime" class="oj-mono pinefetch-ocr-time"></span> /
+                                                <span id="historyOcrTimeTotal" class="oj-mono pinefetch-ocr-time"></span
+                                            ></span>
+                                            <span class="pinefetch-ocr-progress-group"
+                                                >· Frames
+                                                <span id="historyOcrFrames" class="oj-mono pinefetch-ocr-frames"></span>
+                                                /
+                                                <span
+                                                    id="historyOcrFramesTotal"
+                                                    class="oj-mono pinefetch-ocr-frames"
+                                                ></span
+                                            ></span>
+                                        </p>
                                         <div>
                                             <button
                                                 id="historyOcrCancelBtn"

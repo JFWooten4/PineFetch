@@ -764,6 +764,23 @@ try {
                     expected => globalThis.document.getElementById('historyOcrStatus').textContent === expected,
                     status
                 );
+            const ocrProgressText = async () =>
+                (await page.locator('#historyOcrProgressText').textContent()).replace(/\s+/g, ' ').trim();
+            const ocrCounterLayout = () =>
+                page.evaluate(() =>
+                    [
+                        'historyOcrTime',
+                        'historyOcrTimeTotal',
+                        'historyOcrFrames',
+                        'historyOcrFramesTotal',
+                        'historyOcrProgressText',
+                        'historyOcrCancelBtn',
+                        'historyOcrThumbnail',
+                    ].map(id => {
+                        const { x, y, width, height } = globalThis.document.getElementById(id).getBoundingClientRect();
+                        return { id, x, y, width, height };
+                    })
+                );
             await openOcr('history-1');
             await expectOcrStatus('Not checked yet');
             assert.equal(
@@ -779,6 +796,8 @@ try {
                 'history-1',
             ]);
             assert.equal(await page.locator('#historyOcrProgress').getAttribute('value'), null);
+            assert(await page.locator('#historyOcrPreparing').isVisible());
+            assert.equal(await page.locator('#historyOcrProgressText').isVisible(), false);
             assert(await page.locator('#historyOcrThumbnail').isVisible());
             assert(await page.locator('#historyOcrThumbnail').getAttribute('src'));
             await page.evaluate(() => {
@@ -790,10 +809,7 @@ try {
                 progress.total_frames_is_estimate = true;
                 globalThis.__pinefetchUi.emit('history:ocr', progress);
             });
-            assert.equal(
-                await page.locator('#historyOcrProgressText').textContent(),
-                'Video time 00:00:03 / 00:01:00 · Frames 3 / ≈60'
-            );
+            assert.equal(await ocrProgressText(), 'Video time 00:00:03 / 00:01:00 · Frames 3 / 60');
             assert(
                 Math.abs(Number(await page.locator('#historyOcrProgress').getAttribute('value')) - 3020 / 60000) < 1e-9
             );
@@ -808,12 +824,42 @@ try {
                 });
                 globalThis.__pinefetchUi.emit('history:ocr', progress);
             });
-            assert.equal(
-                await page.locator('#historyOcrProgressText').textContent(),
-                'Video time 00:12:20 / 00:21:45 · Frames 741 / ≈1306'
-            );
+            assert.equal(await ocrProgressText(), 'Video time 00:12:20 / 00:21:45 · Frames 741 / 1306');
             assert(await page.locator('#historyOcrThumbnail').isVisible());
             assert(await page.locator('#historyOcrPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
+            await page.evaluate(() => globalThis.document.fonts.ready);
+            const counterLayout = await ocrCounterLayout();
+            for (const frames of [9, 10, 99, 100, 999, 1000]) {
+                await page.evaluate(framesChecked => {
+                    const progress = globalThis.__pinefetchUi.ocrProgress['history-1'];
+                    Object.assign(progress, { frames_checked: framesChecked, observed_at_ms: framesChecked * 1000 });
+                    globalThis.__pinefetchUi.emit('history:ocr', progress);
+                }, frames);
+                assert.deepEqual(await ocrCounterLayout(), counterLayout, `Counters shifted at ${frames} frames`);
+                assert.equal(
+                    await ocrProgressText(),
+                    `Video time ${[Math.floor(frames / 3600), Math.floor(frames / 60) % 60, frames % 60].map(part => String(part).padStart(2, '0')).join(':')} / 00:21:45 · Frames ${frames} / 1306`
+                );
+            }
+            // Final extraction can reduce the total's digit count without moving
+            // separators, controls or the thumbnail.
+            await page.evaluate(() => {
+                const progress = globalThis.__pinefetchUi.ocrProgress['history-1'];
+                Object.assign(progress, { frames_checked: 999, total_frames: 999, total_frames_is_estimate: false });
+                globalThis.__pinefetchUi.emit('history:ocr', progress);
+            });
+            await expectOcrStatus('Finishing OCR…');
+            assert.deepEqual(await ocrCounterLayout(), counterLayout);
+            await page.evaluate(() => {
+                const progress = globalThis.__pinefetchUi.ocrProgress['history-1'];
+                Object.assign(progress, {
+                    frames_checked: 741,
+                    observed_at_ms: 740000,
+                    total_frames: 1306,
+                    total_frames_is_estimate: true,
+                });
+                globalThis.__pinefetchUi.emit('history:ocr', progress);
+            });
             await page.screenshot({ path: `/tmp/pinefetch-ocr-progress-${engine.name()}.png` });
             await page.setViewportSize({ width: 1400, height: 960 });
             await closeDetails();
@@ -825,10 +871,7 @@ try {
             );
             await openOcr('history-1');
             await expectOcrStatus('Checking for OCR…');
-            assert.equal(
-                await page.locator('#historyOcrProgressText').textContent(),
-                'Video time 00:12:20 / 00:21:45 · Frames 741 / ≈1306'
-            );
+            assert.equal(await ocrProgressText(), 'Video time 00:12:20 / 00:21:45 · Frames 741 / 1306');
             await page.locator('#historyOcrCancelBtn').click();
             await expectOcrStatus('OCR cancelled');
             await closeDetails();
@@ -845,10 +888,7 @@ try {
                 globalThis.__pinefetchUi.emit('history:ocr', progress);
             });
             await expectOcrStatus('Finishing OCR…');
-            assert.equal(
-                await page.locator('#historyOcrProgressText').textContent(),
-                'Video time 00:00:03 / 00:00:03 · Frames 4 / 4'
-            );
+            assert.equal(await ocrProgressText(), 'Video time 00:00:03 / 00:00:03 · Frames 4 / 4');
             assert(Number(await page.locator('#historyOcrProgress').getAttribute('value')) < 1);
             await page.evaluate(() => {
                 const ui = globalThis.__pinefetchUi;
@@ -935,10 +975,7 @@ try {
                 globalThis.__pinefetchUi.emit('history:ocr', progress);
             });
             assert.equal(await page.locator('#historyOcrProgress').getAttribute('value'), null);
-            assert.equal(
-                await page.locator('#historyOcrProgressText').textContent(),
-                'Video time 00:00:01 / Unknown · Frames 1 / Unknown'
-            );
+            assert.equal(await ocrProgressText(), 'Video time 00:00:01 / Unknown · Frames 1 / Unknown');
             await page.locator('#historyOcrCancelBtn').click();
             await expectOcrStatus('OCR cancelled');
             await closeDetails();
