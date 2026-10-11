@@ -579,7 +579,7 @@ fn version_one_upgrade_and_sql_failure_roll_back_entire_section_and_retry() {
     // Construct the version-1 baseline using the implemented adoption step,
     // then fail version 2. Version 1 is an internal baseline, not an old app.
     conn.execute_batch(
-        "DROP TABLE history_ocr; DROP TABLE job_completions; DROP TABLE legacy_imports; PRAGMA user_version=1;",
+        "DROP TABLE history_ocr_frames; DROP TABLE history_ocr; DROP TABLE job_completions; DROP TABLE legacy_imports; PRAGMA user_version=1;",
     )
     .unwrap();
     let before = schema(&conn);

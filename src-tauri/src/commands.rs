@@ -224,8 +224,28 @@ pub(crate) fn get_history_caption(
 pub(crate) fn get_history_ocr(
     state: State<AppState>,
     id: String,
+    limit: Option<u64>,
+    offset: Option<u64>,
+    search: Option<String>,
+    result_revision: Option<String>,
 ) -> Result<Option<crate::models::OcrContent>, String> {
-    crate::ocr_store::get(&state.db, &id)
+    crate::ocr_store::page(
+        &state.db,
+        &id,
+        limit.unwrap_or(100),
+        offset.unwrap_or(0),
+        search.as_deref().unwrap_or(""),
+        result_revision.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub(crate) fn get_history_ocr_text(
+    state: State<AppState>,
+    id: String,
+    result_revision: String,
+) -> Result<String, String> {
+    crate::ocr_store::export_text(&state.db, &id, Some(&result_revision))
 }
 
 #[tauri::command]
@@ -268,17 +288,12 @@ pub(crate) async fn get_history_ocr_frame(
 }
 
 #[tauri::command]
-pub(crate) fn delete_history_ocr_observation(
+pub(crate) fn delete_history_ocr_frame_text(
     state: State<AppState>,
     id: String,
     selection: crate::models::OcrSelection,
-    whole_segment: Option<bool>,
 ) -> Result<crate::models::OcrContent, String> {
-    if whole_segment.unwrap_or(false) {
-        crate::ocr_store::delete_segment(&state.db, &id, &selection)
-    } else {
-        crate::ocr_store::delete_observation(&state.db, &id, &selection)
-    }
+    crate::ocr_store::delete_frame(&state.db, &id, &selection)
 }
 
 #[tauri::command]

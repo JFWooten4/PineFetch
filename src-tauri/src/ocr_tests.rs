@@ -2,7 +2,7 @@
 use crate::database::{self, Database, MigrationPoint};
 use crate::models::{OcrProgress, OcrResult};
 use crate::ocr::{self, OcrState, OcrTools};
-use crate::ocr_rules::{self, Observation, OcrBox, SegmentBuilder};
+use crate::ocr_rules::{self, FrameBuilder, Observation, OcrBox};
 use crate::ocr_store;
 use crate::test_support::TempRoot;
 use rusqlite::Connection;
@@ -17,13 +17,12 @@ fn db() -> Database {
     Database::new(conn)
 }
 fn result(text: &str) -> OcrResult {
-    let mut builder = SegmentBuilder::default();
+    let mut builder = FrameBuilder::default();
     if !text.is_empty() {
-        builder.push(3020, vec![observation(text, 0.1)]).unwrap();
+        builder.push(0, 3020, vec![observation(text, 0.1)]).unwrap();
     }
     OcrResult {
-        text: ocr_rules::readable_text(&builder.segments),
-        segments: builder.segments,
+        frames: builder.frames,
         source_sha256: "a".repeat(64),
         engine_version:
             r#"{"vision_request_revision":3,"macos_version":"synthetic","helper_version":"2"}"#
@@ -65,34 +64,52 @@ fn selection(
 ) -> crate::models::OcrSelection {
     crate::models::OcrSelection {
         result_revision: content.result_revision.clone().unwrap(),
-        segment_index: index,
-        observed_at_ms: time,
+        frame_id: content
+            .frames
+            .get(index)
+            .filter(|frame| frame.timestamp_ms == time)
+            .or_else(|| {
+                content
+                    .frames
+                    .iter()
+                    .find(|frame| frame.timestamp_ms == time)
+            })
+            .unwrap()
+            .id
+            .clone(),
     }
 }
 
 #[test]
-fn deleting_ocr_observations_preserves_other_times_and_rejects_stale_or_running_edits() {
+fn deleting_one_frame_removes_all_its_blocks_but_preserves_other_times_and_rejects_stale_edits() {
     let db = db();
     let mut saved = result("Repeated text");
-    saved.segments[0].observed_at_ms.push(4030);
-    saved.text = ocr_rules::readable_text(&saved.segments);
+    let duplicate = saved.frames[0].blocks[0].clone();
+    saved.frames[0].blocks.push(duplicate);
+    saved.frames[0].full_text = ocr_rules::frame_text(&saved.frames[0].blocks);
+    let mut later = saved.frames[0].clone();
+    later.id = "later-frame".into();
+    later.timestamp_ms = 4030;
+    later.frame_key = Some(1);
+    saved.frames.push(later);
     ocr_store::begin(&db, "video", "first").unwrap();
     ocr_store::finish(&db, "video", "first", &saved).unwrap();
     let original = ocr_store::get(&db, "video").unwrap().unwrap();
     let stale = selection(&original, 0, 3020);
     let mut invalid = stale.clone();
-    invalid.segment_index = usize::MAX;
-    assert!(ocr_store::delete_observation(&db, "video", &invalid).is_err());
-    invalid = stale.clone();
-    invalid.observed_at_ms = 4000;
-    assert!(ocr_store::delete_observation(&db, "video", &invalid).is_err());
+    invalid.frame_id = "missing".into();
+    assert!(ocr_store::delete_frame(&db, "video", &invalid).is_err());
     ocr_store::begin(&db, "video", "rerun").unwrap();
-    assert!(ocr_store::delete_observation(&db, "video", &stale)
+    assert!(ocr_store::delete_frame(&db, "video", &stale)
         .unwrap_err()
         .contains("finish"));
     ocr_store::fail(&db, "video", "rerun", "cancelled", "Cancelled").unwrap();
-    db.lock().unwrap().execute_batch("CREATE TRIGGER reject_ocr_delete BEFORE UPDATE OF segments_json ON history_ocr BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END;").unwrap();
-    assert!(ocr_store::delete_observation(&db, "video", &stale).is_err());
+    db.lock().unwrap().execute_batch("CREATE TRIGGER reject_ocr_delete BEFORE UPDATE OF result_revision ON history_ocr BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END;").unwrap();
+    assert!(ocr_store::delete_frame(&db, "video", &stale).is_err());
+    assert_eq!(
+        ocr_store::get(&db, "video").unwrap().unwrap().frames,
+        original.frames
+    );
     assert_eq!(
         ocr_store::get(&db, "video")
             .unwrap()
@@ -102,118 +119,102 @@ fn deleting_ocr_observations_preserves_other_times_and_rejects_stale_or_running_
     );
     db.lock()
         .unwrap()
-        .execute_batch("DROP TRIGGER reject_ocr_delete;")
+        .execute_batch("DROP TRIGGER reject_ocr_delete")
         .unwrap();
-    let edited = ocr_store::delete_observation(&db, "video", &stale).unwrap();
+    let edited = ocr_store::delete_frame(&db, "video", &stale).unwrap();
+    assert_eq!(edited.frames.len(), 1);
+    assert_eq!(edited.frames[0].id, "later-frame");
     assert_eq!(
-        edited.segments.as_ref().unwrap()[0].observed_at_ms,
-        vec![4030]
+        ocr_store::export_text(&db, "video", None).unwrap(),
+        "[00:00:04.030]\nRepeated text\nRepeated text"
     );
-    assert_eq!(edited.text.as_deref(), Some("[00:00:04.030] Repeated text"));
     assert_eq!(edited.source_sha256, original.source_sha256);
     assert_eq!(edited.result_created_at, original.result_created_at);
     assert_eq!(edited.engine_version, original.engine_version);
     assert_ne!(edited.result_revision, original.result_revision);
-    assert!(ocr_store::delete_observation(&db, "video", &stale)
+    assert!(ocr_store::delete_frame(&db, "video", &stale)
         .unwrap_err()
         .contains("changed"));
-    let empty = ocr_store::delete_observation(&db, "video", &selection(&edited, 0, 4030)).unwrap();
-    assert!(empty.segments.unwrap().is_empty());
-    assert_eq!(empty.text.as_deref(), Some(""));
+    assert!(ocr_store::export_text(&db, "video", stale.result_revision.as_str().into()).is_err());
+    assert!(ocr_store::page(&db, "video", 100, 0, "", Some(&stale.result_revision)).is_err());
+    let empty = ocr_store::delete_frame(&db, "video", &selection(&edited, 0, 4030)).unwrap();
+    assert_eq!(empty.total_count, 0);
+    assert!(empty.frames.is_empty());
+    assert_eq!(ocr_store::export_text(&db, "video", None).unwrap(), "");
     assert_eq!(empty.last_attempt_status, "cancelled");
-    assert_eq!(
-        ocr_store::get(&db, "video")
-            .unwrap()
-            .unwrap()
-            .text
-            .as_deref(),
-        Some("")
-    );
 }
 
 #[test]
-fn deleting_ocr_groups_removes_the_run_atomically_and_preserves_later_reappearances() {
+fn successful_replacement_is_atomic_and_invalid_or_oversized_frames_preserve_previous_results() {
     let db = db();
-    let mut saved = result("Repeated text");
-    saved.segments[0].observed_at_ms = vec![3020, 4030, 5040];
-    let mut later = saved.segments[0].clone();
-    later.observed_at_ms = vec![9030, 10040];
-    saved.segments.push(later);
-    saved.text = ocr_rules::readable_text(&saved.segments);
     ocr_store::begin(&db, "video", "first").unwrap();
-    ocr_store::finish(&db, "video", "first", &saved).unwrap();
-    let original = ocr_store::get(&db, "video").unwrap().unwrap();
-    let selected = selection(&original, 0, 3020);
-    let mut invalid = selected.clone();
-    invalid.observed_at_ms = 8000;
-    assert!(ocr_store::delete_segment(&db, "video", &invalid).is_err());
-    ocr_store::begin(&db, "video", "rerun").unwrap();
-    assert!(ocr_store::delete_segment(&db, "video", &selected)
-        .unwrap_err()
-        .contains("finish"));
-    ocr_store::fail(&db, "video", "rerun", "cancelled", "Cancelled").unwrap();
-    db.lock().unwrap().execute_batch("CREATE TRIGGER reject_ocr_group_delete BEFORE UPDATE OF segments_json ON history_ocr BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END;").unwrap();
-    assert!(ocr_store::delete_segment(&db, "video", &selected).is_err());
+    ocr_store::finish(&db, "video", "first", &result("Previous text")).unwrap();
+    let previous = ocr_store::get(&db, "video").unwrap().unwrap();
+    ocr_store::begin(&db, "video", "retry").unwrap();
+    db.lock().unwrap().execute_batch("CREATE TRIGGER reject_frame_insert BEFORE INSERT ON history_ocr_frames BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END;").unwrap();
+    assert!(ocr_store::finish(&db, "video", "retry", &result("New text")).is_err());
+    assert_eq!(
+        ocr_store::get(&db, "video").unwrap().unwrap().frames,
+        previous.frames
+    );
     assert_eq!(
         ocr_store::get(&db, "video")
             .unwrap()
             .unwrap()
             .result_revision,
-        original.result_revision
+        previous.result_revision
     );
     db.lock()
         .unwrap()
-        .execute_batch("DROP TRIGGER reject_ocr_group_delete;")
+        .execute_batch("DROP TRIGGER reject_frame_insert")
         .unwrap();
-    let edited = ocr_store::delete_segment(&db, "video", &selected).unwrap();
-    assert_eq!(edited.segments.as_ref().unwrap().len(), 1);
-    assert_eq!(
-        edited.segments.as_ref().unwrap()[0].observed_at_ms,
-        vec![9030, 10040]
-    );
-    assert_eq!(
-        edited.text.as_deref(),
-        Some("[00:00:09.030, 00:00:10.040] Repeated text")
-    );
-    assert_eq!(edited.result_created_at, original.result_created_at);
-    assert_eq!(edited.source_sha256, original.source_sha256);
-    assert_eq!(edited.engine_version, original.engine_version);
-    assert_ne!(edited.result_revision, original.result_revision);
-    assert!(ocr_store::delete_segment(&db, "video", &selected)
+    let mut invalid = result("Good text");
+    invalid.frames[0].full_text = "Invented text".into();
+    assert!(ocr_store::finish(&db, "video", "retry", &invalid)
         .unwrap_err()
-        .contains("changed"));
-    let empty = ocr_store::delete_segment(&db, "video", &selection(&edited, 0, 9030)).unwrap();
-    assert!(empty.segments.unwrap().is_empty());
-    assert_eq!(empty.text.as_deref(), Some(""));
+        .contains("blocks"));
+    let mut huge = result("x");
+    huge.frames = result("text").frames;
+    huge.frames[0].blocks[0].text = "x".repeat(ocr_rules::MAX_RESULT_BYTES);
+    huge.frames[0].full_text = huge.frames[0].blocks[0].text.clone();
+    assert!(ocr_store::finish(&db, "video", "retry", &huge)
+        .unwrap_err()
+        .contains("32 MiB"));
+    assert_eq!(
+        ocr_store::get(&db, "video").unwrap().unwrap().frames,
+        previous.frames
+    );
+    ocr_store::finish(&db, "video", "retry", &result("New text")).unwrap();
+    let next = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_ne!(next.frames[0].id, previous.frames[0].id);
+    assert_ne!(next.result_revision, previous.result_revision);
+    assert!(ocr_store::selected_time(&db, "video", &selection(&previous, 0, 3020)).is_err());
+    assert_eq!(
+        ocr_store::export_text(&db, "video", None).unwrap(),
+        "[00:00:03.020]\nNew text"
+    );
 }
 
 #[test]
-fn integration_ocr_deleted_text_survives_reopening_without_a_schema_change() {
+fn integration_deleted_frame_text_survives_reopening_schema_four() {
     let root = TempRoot::new("ocr-delete-store");
     let path = root.path("history.sqlite");
-    let conn = Connection::open(&path).unwrap();
-    database::initialize(&conn).unwrap();
-    conn.execute("INSERT INTO history_entries (id,url,created_at) VALUES ('video','https://example.com/video',1)", []).unwrap();
-    let db = Database::new(conn);
+    let db = Database::new(database::open(&path).unwrap());
+    db.lock().unwrap().execute("INSERT INTO history_entries (id,url,created_at) VALUES ('video','https://example.com/video',1)", []).unwrap();
     ocr_store::begin(&db, "video", "first").unwrap();
-    let mut saved = result("Unwanted OCR text");
-    saved.segments[0].observed_at_ms = vec![3020, 4030, 5040];
-    saved.text = ocr_rules::readable_text(&saved.segments);
-    ocr_store::finish(&db, "video", "first", &saved).unwrap();
+    ocr_store::finish(&db, "video", "first", &result("Unwanted OCR text")).unwrap();
     let content = ocr_store::get(&db, "video").unwrap().unwrap();
-    ocr_store::delete_segment(&db, "video", &selection(&content, 0, 3020)).unwrap();
+    let deleted = ocr_store::delete_frame(&db, "video", &selection(&content, 0, 3020)).unwrap();
     drop(db);
-    let conn = Connection::open(&path).unwrap();
-    database::initialize(&conn).unwrap();
-    let version: u32 = conn
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(version, 3);
-    let content = ocr_store::get(&Database::new(conn), "video")
-        .unwrap()
-        .unwrap();
-    assert_eq!(content.text.as_deref(), Some(""));
-    assert!(content.segments.unwrap().is_empty());
+    let reopened = Database::new(database::open(&path).unwrap());
+    let content = ocr_store::get(&reopened, "video").unwrap().unwrap();
+    assert!(content.frames.is_empty());
+    assert_eq!(content.total_count, 0);
+    assert_eq!(content.result_revision, deleted.result_revision);
+    assert_eq!(
+        ocr_store::export_text(&reopened, "video", None).unwrap(),
+        ""
+    );
     assert_eq!(content.last_attempt_status, "completed");
 }
 
@@ -265,7 +266,17 @@ fn integration_ocr_preview_matches_vfr_frames_with_a_nonzero_origin_and_detects_
         )
         .unwrap();
     let mut saved = result("Text");
-    saved.segments[0].observed_at_ms = vec![0, 1120, 2400, 3520];
+    saved.frames = [0, 1120, 2400, 3520]
+        .into_iter()
+        .enumerate()
+        .map(|(index, time)| {
+            let mut frame = saved.frames[0].clone();
+            frame.id = format!("frame-{index}");
+            frame.timestamp_ms = time;
+            frame.frame_key = Some(index as u64);
+            frame
+        })
+        .collect();
     saved.source_sha256 = crate::hashing::sha256_from_path(video.to_str())
         .unwrap()
         .unwrap();
@@ -314,7 +325,7 @@ fn integration_ocr_preview_matches_vfr_frames_with_a_nonzero_origin_and_detects_
         assert!(processes.utility_children.lock().unwrap().is_empty());
     }
     let stale = selection(&content, 0, 1120);
-    ocr_store::delete_observation(&db, "video", &stale).unwrap();
+    ocr_store::delete_frame(&db, "video", &stale).unwrap();
     assert!(preview
         .frame(&db, &processes, "video", &stale, &ffmpeg, &ffprobe)
         .unwrap_err()
@@ -335,10 +346,11 @@ fn integration_ocr_preview_matches_vfr_frames_with_a_nonzero_origin_and_detects_
 }
 
 #[test]
-fn short_ocr_text_is_filtered_before_grouping_and_persistence_using_unicode_characters() {
-    let mut builder = SegmentBuilder::default();
+fn short_ocr_text_is_filtered_per_block_using_unicode_without_rewriting_original_text() {
+    let mut builder = FrameBuilder::default();
     builder
         .push(
+            0,
             1000,
             [
                 "",
@@ -355,93 +367,402 @@ fn short_ocr_text_is_filtered_before_grouping_and_persistence_using_unicode_char
             .collect(),
         )
         .unwrap();
-    assert!(builder.segments.is_empty());
-    let db = db();
-    let mut saved = result("");
-    saved.segments = builder.segments.clone();
-    saved.text = ocr_rules::readable_text(&saved.segments);
-    ocr_store::begin(&db, "video", "short-only").unwrap();
-    ocr_store::finish(&db, "video", "short-only", &saved).unwrap();
-    let empty = ocr_store::get(&db, "video").unwrap().unwrap();
-    assert_eq!(empty.text.as_deref(), Some(""));
-    assert!(empty.segments.unwrap().is_empty());
-
+    assert!(builder.frames.is_empty());
     builder
         .push(
+            1,
             2000,
-            ["ABCD", " äöüß ", "😀😁😂😃", "  Text \t hier  "]
+            ["ABCD", " äöüß ", "😀😁😂😃", "  Text \t hier\nZeile  "]
                 .into_iter()
                 .map(|text| observation(text, 0.1))
                 .collect(),
         )
         .unwrap();
-    builder.push(3000, vec![observation("ABC", 0.1)]).unwrap();
-    builder.push(4000, vec![observation("ABCD", 0.1)]).unwrap();
-    saved.segments = builder.segments;
-    saved.text = ocr_rules::readable_text(&saved.segments);
+    builder
+        .push(2, 3000, vec![observation("ABC", 0.1)])
+        .unwrap();
+    builder
+        .push(3, 4000, vec![observation("ABCD", 0.1)])
+        .unwrap();
+    assert_eq!(builder.frames.len(), 2);
+    assert_eq!(builder.frames[0].frame_key, Some(1));
+    assert_eq!(
+        builder.frames[0].full_text,
+        "ABCD\n äöüß \n😀😁😂😃\n  Text \t hier\nZeile  "
+    );
+    let db = db();
+    let mut saved = result("");
+    saved.frames = builder.frames;
     ocr_store::begin(&db, "video", "filtered").unwrap();
     ocr_store::finish(&db, "video", "filtered", &saved).unwrap();
     let stored = ocr_store::get(&db, "video").unwrap().unwrap();
-    let segments = stored.segments.unwrap();
-    assert_eq!(
-        segments
-            .iter()
-            .map(|segment| segment.text.as_str())
-            .collect::<Vec<_>>(),
-        vec!["ABCD", "äöüß", "😀😁😂😃", "Text hier", "ABCD"]
-    );
-    assert_eq!(segments[0].observed_at_ms, vec![2000]);
-    assert_eq!(segments[4].observed_at_ms, vec![4000]);
-    assert_eq!(stored.text.as_deref(), Some(saved.text.as_str()));
+    assert_eq!(stored.frames.len(), 2);
+    assert_eq!(stored.frames[0].full_text, saved.frames[0].full_text);
+    assert_eq!(stored.frames[1].timestamp_ms, 4000);
 }
 
 #[test]
-fn grouping_preserves_positions_reappearances_numbers_and_single_frames() {
-    let mut builder = SegmentBuilder::default();
+fn one_frame_keeps_all_blocks_in_geometric_order_and_different_observation_times_remain_separate() {
+    let mut builder = FrameBuilder::default();
+    let mut upper_right = observation("Right text\nSecond line", 0.6);
+    upper_right.bounds.y = 0.81;
+    let mut upper_left = observation("Same text", 0.1);
+    upper_left.bounds.y = 0.8;
+    let lower = observation("Same text", 0.1);
     builder
         .push(
-            3020,
-            vec![
-                observation("12  Kilometer", 0.1),
-                observation("12 Kilometer", 0.6),
-            ],
+            12,
+            8020,
+            vec![lower.clone(), upper_right.clone(), upper_left.clone()],
         )
         .unwrap();
     builder
-        .push(
-            4030,
-            vec![
-                observation("12 Kilometer", 0.1),
-                observation("13 Kilometer", 0.6),
-            ],
+        .push(13, 8030, vec![lower, upper_right, upper_left])
+        .unwrap();
+    builder.push(14, 9000, vec![]).unwrap();
+    assert_eq!(builder.frames.len(), 2);
+    assert_eq!(
+        builder.frames[0].full_text,
+        "Same text\nRight text\nSecond line\nSame text"
+    );
+    assert_ne!(builder.frames[0].id, builder.frames[1].id);
+    assert_eq!(builder.frames[0].blocks.len(), 3);
+    assert_eq!(builder.frames[0].blocks[0].confidence, Some(0.9));
+    assert_eq!(builder.frames[0].blocks[0].metadata_source, "native_frame");
+    assert!(builder.frames[0].blocks[0].legacy_segment_bounds.is_none());
+    let db = db();
+    let mut saved = result("");
+    saved.frames = builder.frames;
+    ocr_store::begin(&db, "video", "frames").unwrap();
+    ocr_store::finish(&db, "video", "frames", &saved).unwrap();
+    let stored = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(stored.total_count, 2);
+    assert_eq!(stored.frames[0].timestamp_ms, 8020);
+    assert_eq!(stored.frames[1].timestamp_ms, 8030);
+    assert_eq!(
+        ocr_store::export_text(&db, "video", None).unwrap(),
+        ocr_rules::readable_text(&saved.frames)
+    );
+    let (cache, json): (Option<String>, Option<String>) = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT text,segments_json FROM history_ocr", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert!(cache.is_none() && json.is_none());
+}
+
+#[test]
+fn sqlite_pages_search_unloaded_frames_and_export_every_frame_in_stable_time_order() {
+    let db = db();
+    let mut builder = FrameBuilder::default();
+    // Two hours of repeated captions must remain distinct without a video JSON.
+    for index in 0..7201 {
+        let text = if index == 7150 {
+            "Grüße %_ am Ende".into()
+        } else {
+            format!("Repeated caption {index}")
+        };
+        builder
+            .push(index, index * 1000, vec![observation(&text, 0.1)])
+            .unwrap();
+    }
+    let mut saved = result("");
+    saved.frames = builder.frames;
+    // SQL's id tie-breaker remains deterministic for equal precise timestamps.
+    saved.frames[1].timestamp_ms = 0;
+    saved.frames[0].id = "tie-a".into();
+    saved.frames[1].id = "tie-b".into();
+    ocr_store::begin(&db, "video", "long").unwrap();
+    ocr_store::finish(&db, "video", "long", &saved).unwrap();
+    let first = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(first.frames.len(), 100);
+    assert_eq!(first.total_count, 7201);
+    assert_eq!(first.matched_count, 7201);
+    assert_eq!(first.frames[0].id, "tie-a");
+    assert_eq!(first.frames[1].id, "tie-b");
+    assert!(first.has_more);
+    assert!(first.text.is_none());
+    let revision = first.result_revision.as_deref();
+    let next = ocr_store::page(&db, "video", 100, 100, "", revision)
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.frames[0].timestamp_ms, 100000);
+    assert_eq!(next.offset, 100);
+    let found = ocr_store::page(&db, "video", 100, 0, "GRÜẞE %_", revision)
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.total_count, 7201);
+    assert_eq!(found.matched_count, 1);
+    assert_eq!(found.frames[0].timestamp_ms, 7150000);
+    assert!(!found.has_more);
+    assert_eq!(
+        ocr_store::selected_time(&db, "video", &selection(&found, 0, 7150000)).unwrap(),
+        7150000
+    );
+    let exported = ocr_store::export_text(&db, "video", revision).unwrap();
+    assert!(exported
+        .starts_with("[00:00:00.000]\nRepeated caption 0\n\n[00:00:00.000]\nRepeated caption 1"));
+    assert!(exported.contains("[01:59:10.000]\nGrüße %_ am Ende"));
+    assert!(exported.ends_with("[02:00:00.000]\nRepeated caption 7200"));
+    assert_eq!(exported.matches("]\n").count(), 7201);
+    for (limit, offset) in [(0, 0), (101, 0), (100, u64::MAX)] {
+        assert!(ocr_store::page(&db, "video", limit, offset, "", revision).is_err());
+    }
+    let deleted = ocr_store::delete_frame(&db, "video", &selection(&found, 0, 7150000)).unwrap();
+    assert_eq!(deleted.total_count, 7200);
+    assert!(!ocr_store::export_text(&db, "video", None)
+        .unwrap()
+        .contains("Grüße"));
+    assert_eq!(
+        ocr_store::page(&db, "video", 100, 0, "GRÜẞE", None)
+            .unwrap()
+            .unwrap()
+            .matched_count,
+        0
+    );
+}
+
+#[test]
+fn repeated_frame_storage_hits_the_existing_limit_before_exceeding_it() {
+    let mut builder = FrameBuilder::default();
+    let text = "A repeated caption with line breaks\n".repeat(60);
+    let mut index = 0;
+    loop {
+        let before = builder.frames.len();
+        match builder.push(index, index * 1000, vec![observation(&text, 0.1)]) {
+            Ok(()) => index += 1,
+            Err(error) => {
+                assert!(error.contains("32 MiB"));
+                assert_eq!(builder.frames.len(), before);
+                assert!(index > 1000 && index < 10000);
+                break;
+            }
+        }
+    }
+    let size: usize = builder
+        .frames
+        .iter()
+        .map(|frame| ocr_rules::frame_storage_bytes(frame).unwrap())
+        .sum();
+    assert!(size <= ocr_rules::MAX_RESULT_BYTES);
+}
+
+fn schema_three(path: &std::path::Path) -> Connection {
+    let conn = database::open(path).unwrap();
+    conn.execute_batch("DROP TABLE history_ocr_frames;
+        ALTER TABLE history_ocr DROP COLUMN result_revision;
+        ALTER TABLE history_ocr DROP COLUMN result_format;
+        PRAGMA user_version=3;
+        INSERT INTO history_entries (id,url,created_at) VALUES ('video','https://example.com/video',1);").unwrap();
+    conn
+}
+
+#[test]
+fn integration_schema_three_migrates_all_exact_legacy_times_without_inventing_frame_metadata() {
+    let root = TempRoot::new("ocr-frame-migration");
+    let path = root.path("state.sqlite");
+    let conn = schema_three(&path);
+    let segment = |text: &str, times: Vec<u64>, x: f64| ocr_rules::OcrSegment {
+        text: text.into(),
+        observed_at_ms: times,
+        bounds: Some(observation(text, x).bounds),
+    };
+    let segments = vec![
+        segment("Same word", vec![8020, 8030, 10000], 0.1),
+        segment("Other block", vec![8020, 9000], 0.4),
+        segment("Same word", vec![8020], 0.7),
+    ];
+    conn.execute("INSERT INTO history_ocr (history_entry_id,text,segments_json,source_sha256,result_created_at,last_attempt_id,last_attempt_status,last_attempt_at)
+        VALUES ('video','old grouped export',?1,'legacy-hash',123,'legacy','error',456)", [serde_json::to_string(&segments).unwrap()]).unwrap();
+    for (id, json, text) in [
+        ("plain", None, Some("[00:00:08] uncertain legacy text")),
+        ("empty", Some("[]"), Some("")),
+        (
+            "untimed",
+            Some(
+                r#"[{"text":"Unknown time","observed_at_ms":[],"bounds":{"x":0.1,"y":0.1,"width":0.2,"height":0.1}}]"#,
+            ),
+            Some("Unknown time"),
+        ),
+    ] {
+        conn.execute("INSERT INTO history_entries (id,url,created_at) VALUES (?1,'https://example.com/video',1)", [id]).unwrap();
+        conn.execute("INSERT INTO history_ocr (history_entry_id,text,segments_json,result_created_at,last_attempt_id,last_attempt_status,last_attempt_at)
+            VALUES (?1,?2,?3,123,'legacy','completed',456)", rusqlite::params![id,text,json]).unwrap();
+    }
+    conn.execute("INSERT INTO history_entries (id,url,created_at) VALUES ('missing-metadata','https://example.com/video',1)",[]).unwrap();
+    conn.execute_batch("INSERT INTO history_ocr (history_entry_id,segments_json,result_created_at,last_attempt_id,last_attempt_status,last_attempt_at) VALUES ('missing-metadata','[{\"text\":\"Saved without geometry\",\"observed_at_ms\":[8077]},{\"text\":\"Saved without a timestamp\"}]',123,'legacy','completed',456)").unwrap();
+    drop(conn);
+    let db = Database::new(database::open(&path).unwrap());
+    let content = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(
+        content
+            .frames
+            .iter()
+            .map(|frame| frame.timestamp_ms)
+            .collect::<Vec<_>>(),
+        vec![8020, 8030, 9000, 10000]
+    );
+    assert_eq!(
+        content.frames[0].full_text,
+        "Same word\nOther block\nSame word"
+    );
+    assert_eq!(content.frames[1].full_text, "Same word");
+    assert_eq!(content.frames[2].full_text, "Other block");
+    assert!(content.frames.iter().all(|frame| frame.frame_key.is_none()));
+    assert_eq!(content.last_attempt_status, "error");
+    assert_eq!(content.result_created_at, Some(123));
+    let blocks: String = db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT blocks_json FROM history_ocr_frames WHERE id=?1",
+            [&content.frames[0].id],
+            |r| r.get(0),
         )
         .unwrap();
-    builder
-        .push(
-            5040,
-            vec![
-                observation("12 Kilometer", 0.1),
-                observation("13 Kilometer", 0.6),
-            ],
+    let blocks: Vec<ocr_rules::OcrBlock> = serde_json::from_str(&blocks).unwrap();
+    assert_eq!(blocks.len(), 3);
+    assert!(blocks.iter().all(|block| block.bounds.is_none()
+        && block.confidence.is_none()
+        && block.metadata_source == "legacy_segment"
+        && block.legacy_segment_bounds.is_some()));
+    assert!(db.lock().unwrap().query_row("SELECT segments_json IS NULL AND text IS NULL FROM history_ocr WHERE history_entry_id='video'", [], |r| r.get::<_,bool>(0)).unwrap());
+    let plain = ocr_store::get(&db, "plain").unwrap().unwrap();
+    assert!(plain.frames.is_empty());
+    assert_eq!(plain.result_format.as_deref(), Some("legacy_text"));
+    assert_eq!(
+        ocr_store::export_text(&db, "plain", None).unwrap(),
+        "[00:00:08] uncertain legacy text"
+    );
+    assert!(ocr_store::get(&db, "empty")
+        .unwrap()
+        .unwrap()
+        .frames
+        .is_empty());
+    assert_eq!(ocr_store::export_text(&db, "empty", None).unwrap(), "");
+    assert_eq!(
+        ocr_store::export_text(&db, "untimed", None).unwrap(),
+        "Unknown time"
+    );
+    let incomplete = ocr_store::get(&db, "missing-metadata").unwrap().unwrap();
+    assert_eq!(incomplete.frames.len(), 1);
+    assert_eq!(incomplete.frames[0].timestamp_ms, 8077);
+    assert!(incomplete.frames[0].frame_key.is_none());
+    assert_eq!(
+        incomplete.text.as_deref(),
+        Some("Saved without a timestamp")
+    );
+    let unknown: String = db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT blocks_json FROM history_ocr_frames WHERE id=?1",
+            [&incomplete.frames[0].id],
+            |r| r.get(0),
         )
         .unwrap();
-    builder.push(6060, vec![]).unwrap();
-    builder
-        .push(
-            7100,
-            vec![
-                observation("12 Kilometer", 0.1),
-                observation("not 12 Kilometer!", 0.6),
-            ],
-        )
+    let unknown: Vec<ocr_rules::OcrBlock> = serde_json::from_str(&unknown).unwrap();
+    assert!(
+        unknown[0].bounds.is_none()
+            && unknown[0].confidence.is_none()
+            && unknown[0].legacy_segment_bounds.is_none()
+    );
+    assert_eq!(ocr_store::export_text(&db,"missing-metadata",None).unwrap(),"[00:00:08.077]\nSaved without geometry\n\n[Unmapped legacy text]\nSaved without a timestamp");
+    let first_id = content.frames[0].id.clone();
+    let deleted = ocr_store::delete_frame(&db, "video", &selection(&content, 0, 8020)).unwrap();
+    drop(db);
+    let db = Database::new(database::open(&path).unwrap());
+    let restarted = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(restarted.frames, deleted.frames);
+    assert_eq!(restarted.result_revision, deleted.result_revision);
+    assert!(!restarted.frames.iter().any(|frame| frame.id == first_id));
+    db.lock()
+        .unwrap()
+        .execute("DELETE FROM history_entries WHERE id='video'", [])
         .unwrap();
-    assert_eq!(builder.segments.len(), 5);
-    assert_eq!(builder.segments[0].observed_at_ms, vec![3020, 4030, 5040]);
-    assert_eq!(builder.segments[1].observed_at_ms, vec![3020]);
-    assert_eq!(builder.segments[2].text, "13 Kilometer");
-    assert_eq!(builder.segments[3].observed_at_ms, vec![7100]);
-    assert!(ocr_rules::readable_text(&builder.segments)
-        .contains("[00:00:03.020, 00:00:04.030, 00:00:05.040] 12 Kilometer"));
+    assert_eq!(
+        db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM history_ocr_frames WHERE history_entry_id='video'",
+                [],
+                |r| r.get::<_, u64>(0)
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn integration_frame_migration_rolls_back_source_retirement_and_can_retry_without_duplicates() {
+    let root = TempRoot::new("ocr-frame-rollback");
+    let path = root.path("state.sqlite");
+    let conn = schema_three(&path);
+    let json = serde_json::to_string(&vec![ocr_rules::OcrSegment {
+        text: "Retained text".into(),
+        observed_at_ms: vec![1000, 2000],
+        bounds: Some(observation("text", 0.1).bounds),
+    }])
+    .unwrap();
+    conn.execute("INSERT INTO history_ocr (history_entry_id,text,segments_json,result_created_at,last_attempt_id,last_attempt_status,last_attempt_at) VALUES ('video','old export',?1,123,'old','completed',1)",[&json]).unwrap();
+    drop(conn);
+    let before = fs::read(&path).unwrap();
+    assert!(
+        database::open_with_hook(&path, |point| if point == MigrationPoint::OcrFrames {
+            Err("synthetic migration interruption".into())
+        } else {
+            Ok(())
+        })
+        .is_err()
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.pragma_query_value(None, "user_version", |r| r.get::<_, u64>(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        conn.query_row("SELECT segments_json FROM history_ocr", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        json
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='history_ocr_frames'",
+            [],
+            |r| r.get::<_, u64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(conn);
+    let db = Database::new(database::open(&path).unwrap());
+    let migrated = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(migrated.total_count, 2);
+    drop(db);
+    let reopened = Database::new(database::open(&path).unwrap());
+    assert_eq!(
+        ocr_store::get(&reopened, "video").unwrap().unwrap().frames,
+        migrated.frames
+    );
+}
+
+#[test]
+fn integration_invalid_legacy_ocr_aborts_upgrade_and_preserves_the_original_data() {
+    let root = TempRoot::new("ocr-frame-invalid-migration");
+    let path = root.path("state.sqlite");
+    let conn = schema_three(&path);
+    conn.execute_batch("INSERT INTO history_ocr (history_entry_id,text,segments_json,result_created_at,last_attempt_id,last_attempt_status,last_attempt_at) VALUES ('video','Readable fallback','broken JSON',123,'old','completed',1)").unwrap();
+    drop(conn);
+    let before = fs::read(&path).unwrap();
+    assert!(database::open(&path)
+        .unwrap_err()
+        .contains("Source data preserved"));
+    assert_eq!(fs::read(&path).unwrap(), before);
 }
 
 #[test]
@@ -571,8 +892,10 @@ fn successful_and_empty_results_have_durable_metadata() {
     ocr_store::begin(&db, "video", "empty").unwrap();
     ocr_store::finish(&db, "video", "empty", &result("")).unwrap();
     let empty = ocr_store::get(&db, "video").unwrap().unwrap();
-    assert_eq!(empty.text.as_deref(), Some(""));
-    assert_eq!(empty.segments, Some(vec![]));
+    assert!(empty.text.is_none());
+    assert!(empty.frames.is_empty());
+    assert_eq!(empty.total_count, 0);
+    assert_eq!(ocr_store::export_text(&db, "video", None).unwrap(), "");
     assert!(empty.result_created_at.is_some());
     assert_eq!(empty.last_attempt_status, "completed");
 }
@@ -589,7 +912,8 @@ fn failed_cancelled_and_stale_attempts_preserve_the_previous_result() {
         ocr_store::fail(&db, "video", status, status, "synthetic failure").unwrap();
         assert!(ocr_store::finish(&db, "video", status, &result("Too late")).is_err());
         let current = ocr_store::get(&db, "video").unwrap().unwrap();
-        assert_eq!(current.text, saved.text);
+        assert_eq!(current.frames, saved.frames);
+        assert_eq!(current.result_revision, saved.result_revision);
         assert_eq!(current.result_created_at, saved.result_created_at);
         assert_eq!(current.last_attempt_status, status);
     }
@@ -623,7 +947,7 @@ fn history_pages_batch_ocr_statuses_without_loading_result_text() {
 }
 
 #[test]
-fn integration_saved_ocr_and_history_summary_survive_reopening_schema_three() {
+fn integration_saved_ocr_and_history_summary_survive_reopening_schema_four() {
     let root = TempRoot::new("ocr-detail-persistence");
     let path = root.path("state.sqlite");
     let db = Database::new(database::open(&path).unwrap());
@@ -635,7 +959,7 @@ fn integration_saved_ocr_and_history_summary_survive_reopening_schema_three() {
     let reopened = Database::new(database::open(&path).unwrap());
     let content = ocr_store::get(&reopened, "video").unwrap().unwrap();
     assert_eq!(content.text, saved.text);
-    assert_eq!(content.segments, saved.segments);
+    assert_eq!(content.frames, saved.frames);
     assert_eq!(content.result_created_at, saved.result_created_at);
     let page = crate::history::list_history_page_from_db(&reopened, 20, 0).unwrap();
     assert_eq!(page.ocr_statuses[0].status, "completed");
@@ -660,23 +984,17 @@ fn cancellation_before_final_commit_and_storage_failure_cannot_report_success() 
             .status,
         "cancelled"
     );
-    assert!(ocr_store::get(&db, "video")
-        .unwrap()
-        .unwrap()
-        .text
+    assert!(ocr_store::export_text(&db, "video", None)
         .unwrap()
         .ends_with("Old result"));
     let state = OcrState::default();
     ocr_store::begin(&db, "video", "disk").unwrap();
     ocr::test_active(&state, progress("disk"));
-    db.lock().unwrap().execute_batch("CREATE TRIGGER fail_ocr BEFORE UPDATE OF text ON history_ocr BEGIN SELECT RAISE(ABORT,'synthetic disk failure'); END;").unwrap();
+    db.lock().unwrap().execute_batch("CREATE TRIGGER fail_ocr BEFORE UPDATE OF result_revision ON history_ocr BEGIN SELECT RAISE(ABORT,'synthetic disk failure'); END;").unwrap();
     let event = ocr::finalize(&db, &state, Ok(result("New result")), || Ok(())).unwrap();
     assert_eq!(event.status, "error");
     assert!(event.message.unwrap().contains("synthetic disk failure"));
-    assert!(ocr_store::get(&db, "video")
-        .unwrap()
-        .unwrap()
-        .text
+    assert!(ocr_store::export_text(&db, "video", None)
         .unwrap()
         .ends_with("Old result"));
 }
@@ -715,7 +1033,7 @@ fn integration_schema_two_upgrade_failure_rolls_back_and_retry_preserves_rows() 
     let root = TempRoot::new("ocr-migration");
     let path = root.path("state.sqlite");
     let conn = database::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE history_ocr; PRAGMA user_version=2;
+    conn.execute_batch("DROP TABLE history_ocr_frames; DROP TABLE history_ocr; PRAGMA user_version=2;
         INSERT INTO history_entries (id,url,title,created_at) VALUES ('video','https://example.com','Grüße 🌲',123);").unwrap();
     let before: Vec<u8> = fs::read(&path).unwrap();
     drop(conn);
@@ -748,7 +1066,7 @@ fn integration_schema_two_upgrade_failure_rolls_back_and_retry_preserves_rows() 
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        3
+        4
     );
     assert_eq!(
         conn.query_row(
@@ -791,12 +1109,12 @@ fn integration_strict_ocr_layout_refuses_changed_constraints_and_future_versions
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch("DROP TABLE history_ocr").unwrap();
     conn.execute_batch(&original).unwrap();
-    conn.pragma_update(None, "user_version", 4).unwrap();
+    conn.pragma_update(None, "user_version", 5).unwrap();
     drop(conn);
     let bytes = fs::read(&path).unwrap();
     assert!(database::open(&path)
         .unwrap_err()
-        .contains("schema version 4"));
+        .contains("schema version 5"));
     assert_eq!(fs::read(&path).unwrap(), bytes);
 }
 
@@ -869,7 +1187,7 @@ fn integration_ocr_preview_timeout_reaps_tools_and_allows_retry() {
         )
         .unwrap();
     let mut saved = result("Text");
-    saved.segments[0].observed_at_ms = vec![1310];
+    saved.frames[0].timestamp_ms = 1310;
     saved.source_sha256 = crate::hashing::sha256_from_path(path.to_str())
         .unwrap()
         .unwrap();
@@ -945,7 +1263,11 @@ fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_
     let settings: serde_json::Value = serde_json::from_str(&result.settings_json).unwrap();
     assert_eq!(settings["video_duration_ms"], 3500);
     assert_eq!(settings["minimum_text_characters"], 4);
-    assert_eq!(result.segments[0].observed_at_ms, vec![1310]);
+    assert_eq!(result.frames[0].timestamp_ms, 1310);
+    assert_eq!(result.frames[0].frame_key, Some(0));
+    assert_eq!(result.frames.len(), 1);
+    assert_eq!(result.frames[0].full_text, "12 new paths");
+    assert_eq!(result.frames[0].blocks[0].confidence, Some(0.9));
     assert_eq!(
         result.source_sha256,
         crate::hashing::sha256_hex(b"synthetic video")

@@ -459,7 +459,13 @@ pub(crate) struct OcrProgress {
 pub(crate) struct OcrContent {
     pub(crate) history_entry_id: String,
     pub(crate) text: Option<String>,
-    pub(crate) segments: Option<Vec<crate::ocr_rules::OcrSegment>>,
+    // Only unstructured legacy text is returned here. Structured results are paged.
+    pub(crate) result_format: Option<String>,
+    pub(crate) frames: Vec<OcrFrameSummary>,
+    pub(crate) total_count: u64,
+    pub(crate) matched_count: u64,
+    pub(crate) offset: u64,
+    pub(crate) has_more: bool,
     pub(crate) result_revision: Option<String>,
     pub(crate) source_sha256: Option<String>,
     pub(crate) engine: Option<String>,
@@ -476,14 +482,20 @@ pub(crate) struct OcrContent {
 #[serde(deny_unknown_fields)]
 pub(crate) struct OcrSelection {
     pub(crate) result_revision: String,
-    pub(crate) segment_index: usize,
-    pub(crate) observed_at_ms: u64,
+    pub(crate) frame_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub(crate) struct OcrFrameSummary {
+    pub(crate) id: String,
+    pub(crate) timestamp_ms: u64,
+    pub(crate) frame_key: Option<u64>,
+    pub(crate) full_text: String,
 }
 
 #[derive(Debug)]
 pub(crate) struct OcrResult {
-    pub(crate) text: String,
-    pub(crate) segments: Vec<crate::ocr_rules::OcrSegment>,
+    pub(crate) frames: Vec<crate::ocr_rules::OcrFrame>,
     pub(crate) source_sha256: String,
     pub(crate) engine_version: String,
     pub(crate) settings_json: String,

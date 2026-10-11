@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
-pub(super) const SCHEMA_VERSION: i64 = 3;
+pub(super) const SCHEMA_VERSION: i64 = 4;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 // The reported upgraded layout retains this stronger, compatible constraint.
 const LEGACY_HISTORY_VERSION: &str = "2.1.0";
@@ -71,6 +71,23 @@ CREATE TABLE history_ocr (
     last_error TEXT,
     FOREIGN KEY (history_entry_id) REFERENCES history_entries(id) ON DELETE CASCADE
 );
+"#;
+
+// Migration 4 adds frame storage. Migrations 1–3 remain byte-for-byte unchanged.
+const OCR_FRAMES_SQL: &str = r#"
+ALTER TABLE history_ocr ADD COLUMN result_revision TEXT;
+ALTER TABLE history_ocr ADD COLUMN result_format TEXT CHECK (result_format IN ('frames', 'legacy_text'));
+CREATE TABLE history_ocr_frames (
+    id TEXT PRIMARY KEY NOT NULL,
+    history_entry_id TEXT NOT NULL,
+    timestamp_ms INTEGER NOT NULL CHECK (timestamp_ms >= 0),
+    frame_key INTEGER CHECK (frame_key IS NULL OR frame_key >= 0),
+    full_text TEXT NOT NULL CHECK (full_text != ''),
+    blocks_json TEXT NOT NULL,
+    FOREIGN KEY (history_entry_id) REFERENCES history_ocr(history_entry_id) ON DELETE CASCADE
+);
+CREATE INDEX idx_history_ocr_frames_order ON history_ocr_frames(history_entry_id, timestamp_ms, id);
+CREATE UNIQUE INDEX idx_history_ocr_frames_sample ON history_ocr_frames(history_entry_id, frame_key);
 "#;
 
 pub(super) fn open(path: &Path) -> Result<Connection, String> {
@@ -168,6 +185,7 @@ pub(super) enum MigrationPoint {
     Adopted,
     Receipts,
     Ocr,
+    OcrFrames,
 }
 
 pub(super) fn initialize_with_hook(
@@ -176,6 +194,21 @@ pub(super) fn initialize_with_hook(
 ) -> Result<(), String> {
     conn.busy_timeout(LOCK_TIMEOUT)
         .map_err(|e| format!("SQLite timeout setup failed: {e}"))?;
+    // Unicode substring matching retains the viewer's German/English search
+    // meaning. SQLite still filters and pages rows; no full-video JSON is read.
+    conn.create_scalar_function(
+        "pinefetch_contains",
+        2,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            Ok(ctx
+                .get::<String>(0)?
+                .to_lowercase()
+                .contains(&ctx.get::<String>(1)?.to_lowercase()))
+        },
+    )
+    .map_err(|e| e.to_string())?;
     let initial = check_version(conn)?;
     hook(MigrationPoint::Compatible)?;
     // SQLite ignores foreign_keys changes inside a transaction.
@@ -222,6 +255,16 @@ pub(super) fn initialize_with_hook(
         tx.pragma_update(None, "user_version", 3)
             .map_err(|e| e.to_string())?;
         hook(MigrationPoint::Ocr)?;
+    }
+    if version < 4 {
+        tx.execute_batch(OCR_FRAMES_SQL)
+            .map_err(|e| format!("SQLite migration 4 failed: {e}"))?;
+        crate::ocr_store::migrate_frames(&tx).map_err(|e| {
+            format!("SQLite OCR frame migration failed: {e}. Source data preserved.")
+        })?;
+        tx.pragma_update(None, "user_version", 4)
+            .map_err(|e| e.to_string())?;
+        hook(MigrationPoint::OcrFrames)?;
     }
     if check_version(&tx)? != SCHEMA_VERSION {
         return Err(
@@ -387,6 +430,11 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
             .execute_batch(OCR_SQL)
             .map_err(|e| e.to_string())?;
     }
+    if version >= 4 {
+        reference
+            .execute_batch(OCR_FRAMES_SQL)
+            .map_err(|e| e.to_string())?;
+    }
     reference
         .execute_batch("CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
         .map_err(|e| e.to_string())?;
@@ -429,6 +477,11 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
         }
         if version >= 3 && !tables.contains("history_ocr") {
             return Err("Inconsistent schema 3: missing history_ocr; database preserved".into());
+        }
+        if version >= 4 && !tables.contains("history_ocr_frames") {
+            return Err(
+                "Inconsistent schema 4: missing history_ocr_frames; database preserved".into(),
+            );
         }
     } else if (tables.contains("captions") || tables.contains("transcriptions"))
         && !tables.contains("history_entries")
@@ -552,6 +605,19 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
             && !canonical.contains("check(last_attempt_statusin('running','completed','error','cancelled','interrupted'))")
         {
             return Err(format!("{} (OCR attempt status constraint)", fail()));
+        }
+        if version >= 4
+            && table == "history_ocr"
+            && !canonical.contains("check(result_formatin('frames','legacy_text'))")
+        {
+            return Err(format!("{} (OCR result format constraint)", fail()));
+        }
+        if table == "history_ocr_frames"
+            && (!canonical.contains("check(timestamp_ms>=0)")
+                || !canonical.contains("check(frame_keyisnullorframe_key>=0)")
+                || !canonical.contains("check(full_text!='')"))
+        {
+            return Err(format!("{} (OCR frame constraints)", fail()));
         }
         if version < SCHEMA_VERSION {
             // SQLite's historical TEXT PRIMARY KEY permits NULL. Refuse

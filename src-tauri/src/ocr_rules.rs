@@ -1,4 +1,4 @@
-//! Conservative grouping and native protocol/media parsing, without I/O.
+//! Frame-local reading order and native protocol/media parsing, without I/O.
 use serde::{Deserialize, Serialize};
 
 pub(crate) const SAMPLE_INTERVAL_SECONDS: f64 = 1.0;
@@ -54,74 +54,140 @@ pub(crate) struct Observation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub(crate) struct OcrSegment {
     pub(crate) text: String,
+    #[serde(default)]
     pub(crate) observed_at_ms: Vec<u64>,
-    // Vision normalized coordinates, origin bottom-left, in the oriented full frame.
-    pub(crate) bounds: OcrBox,
+    // Read-only legacy format. Older imports may lack geometry entirely.
+    #[serde(default)]
+    pub(crate) bounds: Option<OcrBox>,
 }
 
 #[derive(Default)]
-pub(crate) struct SegmentBuilder {
-    pub(crate) segments: Vec<OcrSegment>,
-    previous: Vec<usize>,
+pub(crate) struct FrameBuilder {
+    pub(crate) frames: Vec<OcrFrame>,
     bytes: usize,
 }
 
-impl SegmentBuilder {
-    pub(crate) fn push(
-        &mut self,
-        time: u64,
-        mut observations: Vec<Observation>,
-    ) -> Result<(), String> {
-        // Reading order within a frame: top to bottom, then left to right.
-        observations.sort_by(|a, b| {
-            b.bounds
-                .y
-                .total_cmp(&a.bounds.y)
-                .then(a.bounds.x.total_cmp(&b.bounds.x))
-        });
-        let mut next = Vec::new();
-        for observation in observations {
-            let text = observation
-                .text
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
-            if text.chars().take(MIN_TEXT_CHARACTERS).count() < MIN_TEXT_CHARACTERS {
-                continue;
-            }
-            let found = self.previous.iter().copied().find(|index| {
-                !next.contains(index)
-                    && self.segments[*index].text == text
-                    && comparable_position(&self.segments[*index].bounds, &observation.bounds)
-            });
-            self.bytes += if found.is_some() { 8 } else { text.len() + 128 };
-            if self.bytes > MAX_RESULT_BYTES {
-                return Err("OCR result exceeds the 32 MiB limit.".into());
-            }
-            let index = if let Some(index) = found {
-                self.segments[index].observed_at_ms.push(time);
-                index
-            } else {
-                self.segments.push(OcrSegment {
-                    text,
-                    observed_at_ms: vec![time],
-                    bounds: observation.bounds,
-                });
-                self.segments.len() - 1
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub(crate) struct OcrBlock {
+    // Preserve the delivered text, including internal line breaks.
+    pub(crate) text: String,
+    pub(crate) bounds: Option<OcrBox>,
+    pub(crate) confidence: Option<f64>,
+    pub(crate) metadata_source: String,
+    // Legacy runs only retained their first box. Never claim it is this frame's box.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub(crate) legacy_segment_bounds: Option<OcrBox>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OcrFrame {
+    pub(crate) id: String,
+    pub(crate) timestamp_ms: u64,
+    pub(crate) frame_key: Option<u64>,
+    pub(crate) full_text: String,
+    pub(crate) blocks: Vec<OcrBlock>,
+}
+
+// Vision coordinates have a bottom-left origin. Top edges anchor approximate
+// text lines; within a line, x determines order. This is a geometric heuristic,
+// not semantic reading order. Stable sorting preserves equal-position repeats.
+pub(crate) fn order_blocks(blocks: &mut [OcrBlock]) {
+    fn bounds(block: &OcrBlock) -> Option<&OcrBox> {
+        block
+            .bounds
+            .as_ref()
+            .or(block.legacy_segment_bounds.as_ref())
+    }
+    blocks.sort_by(|a, b| match (bounds(a), bounds(b)) {
+        (Some(a), Some(b)) => (b.y + b.height).total_cmp(&(a.y + a.height)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        _ => std::cmp::Ordering::Equal,
+    });
+    let mut start = 0;
+    while start < blocks.len() {
+        let Some(anchor) = bounds(&blocks[start]).cloned() else {
+            break;
+        };
+        let mut end = start + 1;
+        while end < blocks.len() {
+            let Some(next) = bounds(&blocks[end]) else {
+                break;
             };
-            next.push(index);
+            let overlap =
+                (anchor.y + anchor.height).min(next.y + next.height) - anchor.y.max(next.y);
+            if overlap < anchor.height.min(next.height) * 0.5 {
+                break;
+            }
+            end += 1;
         }
-        self.previous = next;
-        Ok(())
+        blocks[start..end].sort_by(|a, b| bounds(a).unwrap().x.total_cmp(&bounds(b).unwrap().x));
+        start = end;
     }
 }
 
-fn comparable_position(a: &OcrBox, b: &OcrBox) -> bool {
-    let intersection = (a.x + a.width).min(b.x + b.width) - a.x.max(b.x);
-    let vertical = (a.y + a.height).min(b.y + b.height) - a.y.max(b.y);
-    let overlap = intersection.max(0.0) * vertical.max(0.0);
-    let union = a.width * a.height + b.width * b.height - overlap;
-    union > 0.0 && overlap / union >= 0.6
+pub(crate) fn frame_text(blocks: &[OcrBlock]) -> String {
+    blocks
+        .iter()
+        .map(|block| block.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn frame_storage_bytes(frame: &OcrFrame) -> Result<usize, String> {
+    Ok(serde_json::to_string(&frame.blocks)
+        .map_err(|e| e.to_string())?
+        .len()
+        .saturating_add(frame.full_text.len())
+        .saturating_add(256))
+}
+
+impl FrameBuilder {
+    pub(crate) fn push(
+        &mut self,
+        frame_key: u64,
+        time: u64,
+        observations: Vec<Observation>,
+    ) -> Result<(), String> {
+        let mut blocks: Vec<_> = observations
+            .into_iter()
+            .filter(|o| {
+                o.text
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(MIN_TEXT_CHARACTERS)
+                    .count()
+                    >= MIN_TEXT_CHARACTERS
+            })
+            .map(|o| OcrBlock {
+                text: o.text,
+                bounds: Some(o.bounds),
+                confidence: Some(o.confidence),
+                metadata_source: "native_frame".into(),
+                legacy_segment_bounds: None,
+            })
+            .collect();
+        if blocks.is_empty() {
+            return Ok(());
+        }
+        order_blocks(&mut blocks);
+        let frame = OcrFrame {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp_ms: time,
+            frame_key: Some(frame_key),
+            full_text: frame_text(&blocks),
+            blocks,
+        };
+        let bytes = self.bytes.saturating_add(frame_storage_bytes(&frame)?);
+        if bytes > MAX_RESULT_BYTES {
+            return Err("OCR result exceeds the 32 MiB limit.".into());
+        }
+        self.bytes = bytes;
+        self.frames.push(frame);
+        Ok(())
+    }
 }
 
 pub(crate) fn validate_observations(
@@ -275,20 +341,11 @@ pub(crate) fn timestamp(ms: u64) -> String {
     )
 }
 
-pub(crate) fn readable_text(segments: &[OcrSegment]) -> String {
-    segments
+#[cfg(test)]
+pub(crate) fn readable_text(frames: &[OcrFrame]) -> String {
+    frames
         .iter()
-        .map(|s| {
-            format!(
-                "[{}] {}",
-                s.observed_at_ms
-                    .iter()
-                    .map(|t| timestamp(*t))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                s.text
-            )
-        })
+        .map(|frame| format!("[{}]\n{}", timestamp(frame.timestamp_ms), frame.full_text))
         .collect::<Vec<_>>()
         .join("\n\n")
 }

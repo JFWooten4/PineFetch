@@ -176,7 +176,7 @@ receipts, backup policy and file ownership rules remain in place. See [DATA-INTE
 for those guarantees and their temporary-database/fault-injection regressions.
 
 Local OCR uses `ocr` for background orchestration and an independent process
-registry, `ocr_rules` for conservative grouping/media/protocol validation and
+registry, `ocr_rules` for frame-local reading order/media/protocol validation and
 `ocr_store` for guarded SQL. `history-ocr-jobs.js` owns app-wide events and job
 state independently of navigation. `history-details-view.js` uses a full-container
 workspace with Overview, Transcript (including captions) and OCR Text tabs;
@@ -185,9 +185,12 @@ list and scroll position survive detail navigation. Compact OCR summaries travel
 with each History page using a LEFT JOIN, without result text or per-entry queries.
 `ocr_preview` verifies saved-source identity and extracts requested frames with
 FFmpeg through the app's utility registry, independently of OCR cancellation.
-Result revisions guard preview selection and atomic per-observation deletion;
-edited text and segments stay in the existing OCR row.
-The existing schema 3 and compiled Vision resource are documented
+Stable frame IDs and persisted result revisions guard preview selection and
+atomic deletion of a frame's complete OCR text. Additive schema 4 migrates all
+stored legacy observation times into `history_ocr_frames`; the parent OCR row
+retains result/attempt metadata and unstructured legacy text. SQLite pages and
+filters frame results, while a separate export reads every frame chronologically.
+The frame model, migration and compiled Vision resource are documented
 in [OCR.md](OCR.md); no general job framework is introduced.
 
 ## Frontend boundary

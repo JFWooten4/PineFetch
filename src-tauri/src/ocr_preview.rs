@@ -86,7 +86,7 @@ impl OcrPreviewState {
             }
         };
         let content = ocr_store::get(db, id)?.ok_or("No saved OCR result is available.")?;
-        ocr_store::validate_selection(&content, selection)?;
+        let observed_at_ms = ocr_store::selected_time(db, id, selection)?;
         let hash = content
             .source_sha256
             .ok_or("The analyzed source identity is unavailable.")?;
@@ -135,7 +135,7 @@ impl OcrPreviewState {
         }
         let index = crate::ocr_rules::video_stream_index(&probe.stdout)?;
         let output = process::run_command_output(
-            frame_command(ffmpeg, path, index, selection.observed_at_ms),
+            frame_command(ffmpeg, path, index, observed_at_ms),
             None,
             Some(processes),
             Some(self.remaining(deadline, processes)?),
@@ -146,7 +146,7 @@ impl OcrPreviewState {
             .find_map(|line| crate::ocr_rules::parse_frame_time(line).ok().flatten())
             .map(|(_, time)| time);
         if !output.status.success()
-            || time != Some(selection.observed_at_ms)
+            || time != Some(observed_at_ms)
             || !output.stdout.starts_with(b"\x89PNG\r\n\x1a\n")
             || output.stdout.len() > 4 * 1024 * 1024
         {
@@ -155,8 +155,7 @@ impl OcrPreviewState {
         if fingerprint(path)? != before || ocr_store::saved_path(db, id)? != saved {
             return Err("The saved video changed while loading its frame.".into());
         }
-        let current = ocr_store::get(db, id)?.ok_or("The OCR result is no longer available.")?;
-        ocr_store::validate_selection(&current, selection)?;
+        ocr_store::selected_time(db, id, selection)?;
         self.remaining(deadline, processes)?;
         Ok(format!(
             "data:image/png;base64,{}",

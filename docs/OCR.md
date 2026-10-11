@@ -8,13 +8,28 @@ starts analysis. **Start OCR Analysis**, **Run OCR Again**, **Retry Analysis** a
 **Cancel Analysis** is the only navigation-independent cancellation action.
 History preserves its query, filters, loaded entries and scroll position.
 The header displays the thumbnail during analysis and after completion.
-Detected text is shown once per consecutive group, ordered by its first observed
-timestamp, searchable locally and displayed in pages of 100. Repeated text in
-adjacent sampled frames shares one entry; a later reappearance remains separate.
-The preview uses the group's first frame. Existing saved results use the same
-grouped display without a rerun. **Copy All Text** copies every observation's precise timestamps,
-including text excluded by the current search. All processing and persistence
-remain local; no player, cloud service or transcription engine is added.
+Each sampled frame with retained OCR text is one saved result and one selectable
+row, containing all of that frame's blocks with line breaks. Frames without text
+have no result row; the independent progress counter still includes them. Distinct
+frames remain distinct, including repeated captions and times within the same
+whole display second. SQLite supplies pages of **100** frames in precise timestamp
+order with stable ID tie-breaking. Search covers **all** saved frames using Unicode
+case-insensitive literal substring matching, not just loaded pages. **Copy All Text**
+exports all saved frames independently of filter and pagination:
+
+```text
+[00:00:08.020]
+Der Preisbrecher kommt!!!
+Die 16.11.
+Kasse
+Quelle: Archiv
+
+[00:00:08.030]
+...
+```
+
+Unstructured legacy text remains readable and copyable without an invented frame
+or timestamp. All processing and persistence remain local.
 
 Selecting a timestamp or detected text shows its actual saved-video frame in the
 left side of the viewer. The upper action bar contains the analysis action,
@@ -25,7 +40,7 @@ footer. Narrow windows stack the columns within the available workspace height.
 The timestamp sits directly below the frame; recognized text appears only in
 the result rows. Arrow keys navigate focused results and load the next batch
 when needed. Row selection updates in place without resetting the list's scroll.
-Search retains a matching selection, otherwise selects the first match, and
+Search retains a matching selection in the loaded page, otherwise selects the first match, and
 clears the preview for an empty result. Late preview responses cannot override
 a newer selection or search. FFmpeg seeks on the same normalized local PTS timeline and
 verifies the extracted timestamp, including variable frame intervals and nonzero
@@ -40,16 +55,15 @@ SHA-256 compression is optimized in dev/test builds so large saved videos do not
 spend tens of seconds in an unoptimized hash loop before their first preview.
 The application itself keeps its normal debug build settings.
 
-Each displayed group has a keyboard-accessible delete icon and tooltip. It atomically removes that segment
-and its observations, retaining later reappearances and text at other positions.
-Saved readable text, search, counts and copying update together; the deleted
-group does not reappear at its next timestamp. Deleting the selected group selects
-a remaining neighbor; deleting another group keeps the current selection.
-Deleting the last group leaves a
-valid empty saved result. The native command also retains single-observation
-deletion for callers omitting `wholeSegment`. Deletion persists
-across restart and is disabled during analysis. A later successful **Run OCR Again**
-replaces the edited result with newly recognized observations.
+Each frame row has a keyboard-accessible **Delete frame text** icon and tooltip.
+Its confirmation explicitly removes **all OCR blocks of that frame**, without
+changing any other frame, video file or image. A short transaction removes the
+row and advances the result revision together. Search counts, selection and full
+export then reflect the saved rows. Deleting the selected frame selects a neighbor;
+deleting another frame retains the selected ID where it remains in the loaded
+page. Deleting the last frame leaves a valid empty successful result. Edits survive
+restart and are disabled during analysis. A successful explicit **Run OCR Again**
+atomically replaces them with newly recognized frames.
 
 Only the entry's saved absolute `output_path` is eligible. FFprobe must identify
 a real video stream, excluding attached cover art. Missing files, audio,
@@ -60,7 +74,7 @@ History hash is never reused.
 
 ## Recognition and sampling
 
-`ocr` orchestrates processes; `ocr_rules` owns grouping and validation;
+`ocr` orchestrates processes; `ocr_rules` owns frame-local reading order and validation;
 `ocr_store` owns short SQLite transactions. `native/vision-ocr.swift` uses
 `VNRecognizeTextRequest`, `.accurate`, the full image and no minimum text-height
 cutoff. Language correction is **disabled**. Supported languages are queried
@@ -81,28 +95,30 @@ calculated from file numbers or an assumed frame rate. Cut-video times refer to
 the local cut alone. Sampling can miss brief text and does not prove exact
 display intervals.
 
-Whitespace alone is normalized. New analyses discard recognized text shorter than
-four Unicode characters after whitespace normalization, before grouping or saving
-either the segments or readable text. This minimum is saved as
-`minimum_text_characters` in the analysis settings. Existing results are preserved.
-Exact text at comparable positions in consecutive
-sampled frames joins a segment (bounding-box intersection-over-union at least
-0.6). Missing observations break the sequence. Later reappearances, different
-positions, numbers, URLs, handles, punctuation and negations remain distinct.
-Boxes use Vision's normalized full-frame coordinates with a **bottom-left**
-origin after orientation. Vision's enclosing rectangles can extend beyond the
-image for partially visible text. Helper version **2** intersects them with the
-normalized image rectangle before emitting observations. Wholly invisible
-observations are omitted; invalid native sizes or non-finite coordinates fail.
-Rust still rejects malformed replies and out-of-image boxes. The clipping policy
-is saved in settings; text and confidence remain unchanged. Segments store the first box and all observed times
-in milliseconds. Confidence validates native responses and is not shown as an
-accuracy percentage.
+New analyses still discard blocks shorter than four Unicode characters after
+whitespace normalization **for the length check only**. Accepted original text,
+internal line breaks and actually supplied confidence values are saved unchanged;
+`minimum_text_characters` remains in settings. No correction, summarization or
+semantic interpretation is applied. Text is not deduplicated across positions or
+frames. `FrameBuilder` receives the helper's validated sample ID and real media PTS,
+and creates exactly one result containing the frame's ordered blocks.
+
+Vision boxes use normalized full-frame coordinates with a **bottom-left** origin
+after orientation. Blocks are sorted by their **top edges**, grouped into approximate
+lines by vertical overlap, then sorted left to right within each line. Equal-position
+blocks retain delivery order. This deterministic geometric heuristic does not claim
+to interpret complex posters or columns. Existing multiline block texts are kept.
+
+Helper version **2** clips partially visible enclosing rectangles to the image;
+wholly invisible observations are omitted, invalid sizes or non-finite coordinates
+fail. Rust still rejects malformed replies and out-of-image boxes. The clipping
+policy is recorded. Native blocks retain their actual box and confidence;
+confidence is not shown as an accuracy percentage.
 
 A single private, uniquely created temporary directory holds one image at a
 time; processed images are promptly removed. Pipes and two-message channels
 bound buffering. Frames above 128 MiB, helper responses above 8 MiB, FFmpeg
-diagnostic lines above 64 KiB, or results above a 32 MiB grouping/storage budget
+diagnostic lines above 64 KiB, or results above a 32 MiB frame/storage budget
 fail cleanly. Cleanup checks the owned
 directory's Unix inode and runs on completion, handled failure and cancellation.
 A forced OS kill can leave an owned directory in the OS temporary area; startup
@@ -110,34 +126,69 @@ does not broadly purge ambiguous files.
 
 ## Storage and lifecycle
 
-Additive schema **3** introduces one `history_ocr` row per History ID with
-`ON DELETE CASCADE`. Published migrations 1 and 2 are unchanged. Existing snapshot,
-writer-lock, rollback, compatibility and strict-layout checks apply.
+Additive schema **4** preserves published migrations 1–3 and the existing
+`history_ocr` analysis/result metadata. It adds `result_revision` and `result_format`
+to that parent and the related `history_ocr_frames` table:
 
-`text`, `segments_json`, `source_sha256`, `engine`, `engine_version`,
-`settings_json` and `result_created_at` describe the latest successful result.
-They are nullable before first success. Empty success stores `""`, `[]` and a
-result timestamp. Engine is `apple_vision`; `engine_version` is JSON containing
-the actual Vision request revision, macOS version and helper version, not an
-invented Apple package version. Settings record languages, correction policy,
-orientation, sampling and processed frame count.
+- `id`: stable UUID of a saved frame result.
+- `history_entry_id`: foreign key to `history_ocr`, with cascading deletion.
+- `timestamp_ms`: actually observed local media timestamp, never rounded for grouping.
+- `frame_key`: original sampled-frame number, nullable for unknown legacy identity.
+- `full_text`: deterministic newline join of the ordered original block texts.
+- `blocks_json`: original text, box, confidence and provenance for **one frame only**.
 
-`last_attempt_id`, `last_attempt_status`, `last_attempt_at` and `last_error`
-describe the latest attempt separately; times use epoch milliseconds. Statuses
-are `running`, `completed`, `error`, `cancelled` and `interrupted`. Only a current,
-still-running attempt can replace the successful result in a short guarded
-transaction. Failed/cancelled reruns keep the old result. A failed commit is an
-error even if saving its failure status also fails. Deletion cannot be undone
-by a late result. No DB mutex or transaction spans decoding, Vision or hashing.
+A chronological `(history_entry_id, timestamp_ms, id)` index supports pages; a
+unique `(history_entry_id, frame_key)` index prevents duplicate native sample rows.
+`full_text` is never independently editable. New results retire `segments_json`
+and keep the old `text` column null; that column is used only for genuinely
+unstructured or untimed legacy text, never as a competing structured result cache.
+`source_sha256`, `engine`, `engine_version`, `settings_json` and `result_created_at`
+continue describing the last successfully saved result. Empty success publishes a
+revision and creation time with zero frame rows. Engine/version settings describe
+the actual Vision request revision, OS and helper, languages, correction policy,
+orientation, sampling, total checked frames and local duration.
+
+The migration reads **every stored observation time** in each legacy segment and
+groups only **exactly equal millisecond timestamps**. Equal text from distinct
+segments remains separate blocks. Deleted observations are absent from the source
+and are not recreated. No video is opened and no new analysis starts. Legacy
+`frame_key`, precise `bounds` and `confidence` remain unknown. The old run's box
+is retained explicitly as `legacy_segment_bounds`, with
+`metadata_source: legacy_segment`, rather than presented as each later frame's
+original box. Untimed segments remain readable as unmapped text; text-only results
+have `result_format: legacy_text`. No timestamp patterns are inferred from text.
+
+Migration uses the existing required pre-upgrade SQLite snapshot and one
+transaction. Each inserted frame is read back and verified, and counts are checked
+before the source JSON is retired. Rollback retains the original schema and data;
+versioning prevents duplicate transfers on restart. Legacy expansion is streamed
+one frame at a time using references to the bounded source segments, without
+materializing the entire expanded video text. Legacy observations are preserved
+when expansion exceeds their old compressed size; **new** analyses still fail
+cleanly at the existing 32 MiB budget. Frame text, encoded blocks and row overhead
+are included in that budget. Tests cover two hours / 7,201 repeated frames and
+hitting the limit without accepting an oversized frame.
+
+`last_attempt_id`, `last_attempt_status`, `last_attempt_at` and `last_error` describe
+the latest attempt separately. Only a current running attempt can publish a new
+result, using prepared inserts in one short transaction **after** decoding and
+source validation. Old rows are replaced only if that whole transaction commits.
+Failed, cancelled, interrupted and failed-save attempts retain the prior rows and
+revision. No transaction or DB mutex spans video decoding, Vision or hashing.
 Source inode, size, mtime/ctime and a second SHA-256 verify the same file version;
 the source identity and saved History path are rechecked before commit.
 
-Result DTOs include a derived `result_revision` digest of source identity, result
-timestamp and stored segment JSON. Preview and delete selections contain that
-revision, segment index and observed time. Deletion validates them in an immediate
-transaction and rewrites segments and readable text atomically; stale selections,
-running analyses and failed writes leave the result intact. This adds no column or
-migration and preserves engine/source metadata and the analysis timestamp.
+`get_history_ocr` returns metadata, total/matched frame counts and at most 100 rows
+from a SQLite read snapshot (`limit`, `offset`, `search`, optional `resultRevision`).
+It never reads the full structured video result. `get_history_ocr_text` separately
+exports all rows chronologically. A small scalar function on the existing rusqlite
+dependency preserves Unicode substring matching; no FTS or new dependency is added.
+Preview and `delete_history_ocr_frame_text` accept a stable `frame_id` plus
+`result_revision`. The backend resolves the timestamp itself and rejects stale
+references after a successful rerun or deletion. Preview checks the reference again
+after extracting the image; frontend request guards reject late pages and images.
+Deletion changes only the chosen frame and revision, preserving engine/source
+metadata and the original analysis time.
 
 OCR has its own process registry and finalization lock. Accepted cancellation
 before finalization prevents success. Exit kills/reaps its processes and joins
@@ -167,7 +218,7 @@ thumbnails do not reserve an empty image column.
 states: `not_started`, `queued`, `running`, `completed`, `failed`, `cancelled`
 and `interrupted`. `queued` represents a start request awaiting acknowledgement,
 not an additional native processing queue. The backend's `error` status remains
-compatible with schema 3 and maps to `failed` in the UI. Duplicate starts return
+compatible with schema 4 and maps to `failed` in the UI. Duplicate starts return
 the existing native attempt; pending frontend requests are also deduplicated.
 History pages include compact OCR summaries via one LEFT JOIN, without loading
 OCR text or issuing a query per entry. Events update visible History indicators
@@ -176,7 +227,6 @@ use revisions and attempt guards to reject stale data. Listener cleanup occurs
 on app-page exit, never on detail navigation. Results use `textContent` and
 previous results remain available until a successful rerun replaces them.
 
-The existing SQLite schema 3 is sufficient; this UI redesign adds no migration.
 Completed results survive restart and interrupted native jobs retain the existing
 orphan recovery behavior. Progress is live in memory rather than restored after
 restart. Internal errors are logged; the UI shows concise recovery instructions.
@@ -227,26 +277,15 @@ and runs the helper from an isolated cwd/system PATH. Its optional first argumen
 is the packaged helper path. Developer tools generate this test fixture only;
 the shipped helper does not use them. No release/publishing occurs.
 
-The detail-workspace redesign passes the complete check/build gates (50 JavaScript
-and 213 Rust tests, including 15 OCR tests), Chromium/WebKit background-navigation,
-filter/scroll retention, retry, search, pagination and copying checks, and
-1000 × 960 layout checks.
-The frame overview and observation deletion additionally pass the complete gates
-(50 JavaScript and 217 Rust tests), keyboard selection, out-of-order previews,
-delete failure/persistence/count/copy checks and Chromium/WebKit 1000 × 960 layout
-checks. The native preview regression compares PNGs from fast seeks with an
-independent full decode of synthetic VFR frames with a nonzero timestamp origin,
-then verifies changed-source and stale-selection rejection.
-Timeout regressions cover stalled probe/extraction tools, child cleanup and retry,
-as well as ending a stuck UI request and ignoring its late response.
-The two-column review workspace passes the complete check/build gates (52
-JavaScript and 218 Rust tests). Chromium/WebKit API fixtures cover 801 saved
-entries, incremental loading, full-result copying, in-place selection, independent
-list scrolling, keyboard navigation across batches, delete failures and neighbor
-selection, search-empty states and out-of-order frames. Visual/layout checks cover
-1000 × 960, 1600 × 1100 and 1000 × 720 desktop windows, plus stacked 800 × 960 and
-800 × 720 windows; search, frame and analysis information remain stationary while
-the result list scrolls.
+Frame storage regressions cover multi-block frames, equal displayed seconds,
+repeated text at different positions, empty results, all legacy observation times,
+unknown metadata, migration interruption/rollback/restart, missing videos,
+search outside the first page, complete export, frame-specific deletion,
+atomic save failures, stale references and storage limits. Browser checks use
+isolated native API responses and exercise search, pagination, copying,
+confirmations, keyboard navigation, late pages/images and fixed/narrow layouts.
+Native preview tests independently compare synthetic VFR PNGs by full decode.
+
 The unchanged native OCR engine was separately verified on macOS 26.7 arm64:
 real Vision revision 3 with `de-DE`/`en-US`, VFR times 0/1120/2400/3520 ms, a real
 Tauri app bundle, existing ad-hoc deep signing/strict verification, and the bundled

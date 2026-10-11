@@ -2,7 +2,7 @@
 use crate::database::Database;
 use crate::models::OcrProgress;
 use crate::models::OcrResult;
-use crate::ocr_rules::{self, SegmentBuilder};
+use crate::ocr_rules::{self, FrameBuilder};
 use crate::ocr_store;
 use crate::process::{self, ProcessState};
 use sha2::{Digest, Sha256};
@@ -707,7 +707,7 @@ pub(crate) fn analyze(
     });
     let mut frames = BufReader::new(output);
     let mut stdin = stdin.ok_or("OCR helper stdin unavailable")?;
-    let mut builder = SegmentBuilder::default();
+    let mut builder = FrameBuilder::default();
     let mut frame_id = 0;
     let mut previous_time = None;
     while let Some(png) = read_png(&mut frames)? {
@@ -739,7 +739,7 @@ pub(crate) fn analyze(
         let observations = ocr_rules::validate_observations(&response, frame_id)?;
         fs::remove_file(&frame_path)
             .map_err(|e| format!("OCR temporary frame cleanup failed: {e}"))?;
-        builder.push(time, observations)?;
+        builder.push(frame_id, time, observations)?;
         frame_id += 1;
         previous_time = Some(time);
         progress(AnalysisProgress::Frame {
@@ -788,14 +788,16 @@ pub(crate) fn analyze(
     settings["minimum_text_characters"] = serde_json::json!(ocr_rules::MIN_TEXT_CHARACTERS);
     settings["sampling"] = serde_json::json!("first frame, then first media PTS at least one second after previous selection; local file timeline");
     settings["frames_checked"] = serde_json::json!(frame_id);
+    settings["result_model"] = serde_json::json!("frames");
+    settings["reading_order"] =
+        serde_json::json!("top-edge line heuristic, then left-to-right; original text");
     settings["video_duration_ms"] = serde_json::json!(duration_ms);
     // Success includes cleanup. An unexpected remaining file or filesystem
     // failure must not silently leave a successful attempt's temporary output.
     fs::remove_dir(&workspace.path)
         .map_err(|e| format!("OCR temporary directory cleanup failed: {e}"))?;
     Ok(OcrResult {
-        text: ocr_rules::readable_text(&builder.segments),
-        segments: builder.segments,
+        frames: builder.frames,
         source_sha256: hash,
         engine_version: ready["engine_version"].to_string(),
         settings_json: settings.to_string(),
