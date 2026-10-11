@@ -14,8 +14,12 @@ including text excluded by the current search. All processing and persistence
 remain local; no player, cloud service or transcription engine is added.
 
 Selecting a timestamp or detected text shows its actual saved-video frame in the
-fixed overview above the independently scrolling results, alongside the timestamp
-and selected text. FFmpeg seeks on the same normalized local PTS timeline and
+viewer above the results. The upper action bar contains the analysis action and
+**Copy All Text**. On desktop, the frame occupies about 64% of the viewer width;
+selected text, saved-result metadata, current job status and progress sit on the
+right. Narrow windows stack the columns. The OCR panel scrolls as one area, with
+the search and results immediately below the viewer. FFmpeg seeks on the same
+normalized local PTS timeline and
 verifies the extracted timestamp, including variable frame intervals and nonzero
 origins. Previews are bounded to 1280 × 720 and returned as PNG data URLs without
 writing frames to disk. Source SHA-256 is verified once per unchanged file identity;

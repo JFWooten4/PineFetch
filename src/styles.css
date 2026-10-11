@@ -594,59 +594,83 @@ body {
 .pinefetch-ocr-preview {
     flex-shrink: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--oj-space-4);
-    padding-block: var(--oj-space-3);
-    background: var(--oj-bg-elevated);
-    border-bottom: 1px solid var(--oj-border);
+    grid-template-columns: minmax(0, 0.64fr) minmax(0, 0.36fr);
+    align-items: start;
+    gap: var(--oj-space-5);
 }
 
-#historyOcrPanel {
-    overflow-y: hidden;
+.pinefetch-ocr-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
 }
 
-.pinefetch-ocr-body {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--oj-space-4);
-    padding-right: var(--oj-space-1);
+.pinefetch-ocr-actions .oj-button {
+    padding-inline: var(--oj-space-4);
 }
 
-.pinefetch-ocr-body > * {
+#historyOcrPanel > * {
     flex-shrink: 0;
 }
 
 .pinefetch-ocr-frame-stage {
-    height: 240px;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: min(40dvh, 28rem);
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     border: 1px solid var(--oj-border);
     border-radius: var(--oj-radius-md);
     overflow: hidden;
-    padding: var(--oj-space-2);
 }
 
 .pinefetch-ocr-frame-stage img {
     display: block;
-    max-width: 100%;
-    max-height: 100%;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
 }
 
 .pinefetch-ocr-preview-info {
     min-width: 0;
+    overflow-wrap: anywhere;
+    gap: var(--oj-space-3);
+}
+
+.pinefetch-ocr-preview-info > p {
+    margin: 0;
+}
+
+.pinefetch-ocr-meta {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--oj-space-2) var(--oj-space-3);
+    margin: var(--oj-space-3) 0 0;
+}
+
+.pinefetch-ocr-meta dd {
+    min-width: 0;
+}
+
+#historyOcrFrameStatus {
+    padding: var(--oj-space-4);
 }
 
 #historyOcrSelectedText {
-    max-height: 160px;
-    overflow: auto;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
     user-select: text;
+}
+
+#historyOcrFrameTime:empty,
+#historyOcrSelectedText:empty {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .pinefetch-ocr-preview {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 .pinefetch-ocr-result .oj-text {

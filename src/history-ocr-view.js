@@ -88,7 +88,6 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         state.frameError = '';
     };
     const renderPreview = () => {
-        els.historyOcrPreview.hidden = !hasResult() || !state.rows.length;
         els.historyOcrPreview.setAttribute('aria-busy', String(state.frameLoading));
         els.historyOcrFrame.hidden = !state.frameImage;
         if (state.frameImage) {
@@ -169,7 +168,6 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
     };
     const renderResults = () => {
         els.historyOcrResults.hidden = !hasResult();
-        els.historyOcrSamplingNotice.hidden = !hasResult();
         els.historyOcrCopyBtn.disabled = !copyText();
         if (!hasResult()) {
             renderPreview();
@@ -320,10 +318,11 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         els.historyOcrCancelBtn.hidden = !active;
         els.historyOcrCancelBtn.disabled = !progress?.attempt_id || state.cancelling;
         renderResults();
-        els.historyOcrMeta.hidden = !hasResult();
-        els.historyOcrMeta.textContent = hasResult()
-            ? `${state.rows.length.toLocaleString()} detected entries · Analyzed: ${formatLocalDateTime(new Date(content.result_created_at))}${status !== 'completed' ? ' · Previous result remains available' : ''}`
-            : '';
+        els.historyOcrEntryCount.textContent = hasResult() ? state.rows.length.toLocaleString() : '—';
+        els.historyOcrAnalyzed.textContent = hasResult()
+            ? formatLocalDateTime(new Date(content.result_created_at))
+            : '—';
+        els.historyOcrPreviousResult.hidden = !hasResult() || status === 'completed';
     };
     const deactivate = () => {
         state.request += 1;

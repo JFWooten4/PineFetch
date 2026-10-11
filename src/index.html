@@ -704,11 +704,23 @@
                                 aria-labelledby="historyOcrTab"
                                 hidden
                             >
+                                <div class="oj-toolbar pinefetch-ocr-actions">
+                                    <button id="historyOcrStartBtn" class="oj-button oj-button-secondary" type="button">
+                                        Start OCR Analysis
+                                    </button>
+                                    <button
+                                        id="historyOcrCopyBtn"
+                                        class="oj-button oj-button-primary"
+                                        type="button"
+                                        disabled
+                                    >
+                                        Copy All Text
+                                    </button>
+                                </div>
                                 <section
                                     id="historyOcrPreview"
                                     class="pinefetch-ocr-preview"
                                     aria-labelledby="historyOcrPreviewTitle"
-                                    hidden
                                 >
                                     <div class="pinefetch-ocr-frame-stage">
                                         <img id="historyOcrFrame" alt="" hidden />
@@ -725,34 +737,35 @@
                                         <h3 id="historyOcrPreviewTitle" class="oj-heading-3">Selected Frame</h3>
                                         <p id="historyOcrFrameTime" class="oj-mono oj-caption"></p>
                                         <p id="historyOcrSelectedText" class="oj-text"></p>
-                                    </div>
-                                </section>
-                                <div class="pinefetch-ocr-body">
-                                    <div class="pinefetch-history-content-toolbar">
-                                        <div class="pinefetch-panel-heading">
-                                            <h3 class="oj-heading-3">OCR Analysis</h3>
-                                            <p class="oj-helper">
-                                                Extract text appearing in video frames using Apple Vision.
-                                            </p>
-                                        </div>
-                                        <button
-                                            id="historyOcrStartBtn"
-                                            class="oj-button oj-button-primary"
-                                            type="button"
-                                        >
-                                            Start OCR Analysis
-                                        </button>
-                                    </div>
-                                    <p class="oj-helper">
-                                        Analysis runs in the background. You can continue using PineFetch.
-                                    </p>
-                                    <p id="historyOcrMeta" class="oj-muted"></p>
-                                    <p id="historyOcrStatus" class="oj-status" role="status" aria-live="polite">
-                                        Not checked yet
-                                    </p>
-                                    <p id="historyOcrNotice" class="oj-helper" hidden></p>
-                                    <div id="historyOcrAnalysis" class="oj-stack" hidden>
-                                        <div class="pinefetch-panel-heading">
+                                        <dl id="historyOcrMeta" class="oj-definition-list pinefetch-ocr-meta">
+                                            <dt>Entries</dt>
+                                            <dd id="historyOcrEntryCount">—</dd>
+                                            <dt>Analyzed</dt>
+                                            <dd id="historyOcrAnalyzed">—</dd>
+                                            <dt>Status</dt>
+                                            <dd>
+                                                <span
+                                                    id="historyOcrStatus"
+                                                    class="oj-status"
+                                                    role="status"
+                                                    aria-live="polite"
+                                                >
+                                                    Not checked yet
+                                                </span>
+                                            </dd>
+                                        </dl>
+                                        <p id="historyOcrPreviousResult" class="oj-helper" hidden>
+                                            Previous result remains available
+                                        </p>
+                                        <p id="historyOcrNotice" class="oj-helper" hidden></p>
+                                        <p
+                                            id="historyOcrActionNotice"
+                                            class="oj-helper"
+                                            role="status"
+                                            aria-live="polite"
+                                            hidden
+                                        ></p>
+                                        <div id="historyOcrAnalysis" class="oj-stack" hidden>
                                             <progress
                                                 id="historyOcrProgress"
                                                 class="oj-progress"
@@ -798,66 +811,45 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <p id="historyOcrSamplingNotice" class="oj-helper" hidden>
-                                        Times are observations from sampled frames in the local video, not exact text
-                                        display intervals.
-                                    </p>
-                                    <section
-                                        id="historyOcrResults"
-                                        class="oj-stack"
-                                        aria-labelledby="historyOcrResultsTitle"
+                                </section>
+                                <section
+                                    id="historyOcrResults"
+                                    class="oj-stack"
+                                    aria-labelledby="historyOcrResultsTitle"
+                                    hidden
+                                >
+                                    <h3 id="historyOcrResultsTitle" class="oj-heading-3">Detected Text</h3>
+                                    <label class="oj-field" for="historyOcrSearchInput">
+                                        <span class="oj-label">Search detected text</span>
+                                        <input
+                                            id="historyOcrSearchInput"
+                                            class="oj-input"
+                                            type="search"
+                                            placeholder="Search OCR text"
+                                            autocomplete="off"
+                                        />
+                                    </label>
+                                    <p
+                                        id="historyOcrResultCount"
+                                        class="oj-caption"
+                                        role="status"
+                                        aria-live="polite"
+                                    ></p>
+                                    <p id="historyOcrEmpty" class="oj-helper" hidden></p>
+                                    <ol
+                                        id="historyOcrText"
+                                        class="pinefetch-ocr-results"
+                                        aria-label="Detected text in chronological order"
+                                    ></ol>
+                                    <button
+                                        id="historyOcrLoadMoreBtn"
+                                        class="oj-button oj-button-ghost"
+                                        type="button"
                                         hidden
                                     >
-                                        <div class="pinefetch-history-content-toolbar">
-                                            <h3 id="historyOcrResultsTitle" class="oj-heading-3">Detected Text</h3>
-                                            <button
-                                                id="historyOcrCopyBtn"
-                                                class="oj-button oj-button-ghost"
-                                                type="button"
-                                                disabled
-                                            >
-                                                Copy All Text
-                                            </button>
-                                        </div>
-                                        <label class="oj-field" for="historyOcrSearchInput">
-                                            <span class="oj-label">Search detected text</span>
-                                            <input
-                                                id="historyOcrSearchInput"
-                                                class="oj-input"
-                                                type="search"
-                                                placeholder="Search OCR text"
-                                                autocomplete="off"
-                                            />
-                                        </label>
-                                        <p
-                                            id="historyOcrResultCount"
-                                            class="oj-caption"
-                                            role="status"
-                                            aria-live="polite"
-                                        ></p>
-                                        <p id="historyOcrEmpty" class="oj-helper" hidden></p>
-                                        <p
-                                            id="historyOcrActionNotice"
-                                            class="oj-helper"
-                                            role="status"
-                                            aria-live="polite"
-                                            hidden
-                                        ></p>
-                                        <ol
-                                            id="historyOcrText"
-                                            class="pinefetch-ocr-results"
-                                            aria-label="Detected text in chronological order"
-                                        ></ol>
-                                        <button
-                                            id="historyOcrLoadMoreBtn"
-                                            class="oj-button oj-button-ghost"
-                                            type="button"
-                                            hidden
-                                        >
-                                            Show more text
-                                        </button>
-                                    </section>
-                                </div>
+                                        Show more text
+                                    </button>
+                                </section>
                             </section>
 
                             <section
