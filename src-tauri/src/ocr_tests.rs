@@ -560,6 +560,58 @@ fn schema_three(path: &std::path::Path) -> Connection {
 }
 
 #[test]
+fn integration_frame_migration_preserves_json_with_high_precision_legacy_bounds() {
+    let root = TempRoot::new("ocr-frame-precision");
+    let path = root.path("state.sqlite");
+    let conn = schema_three(&path);
+    // This valid coordinate changes by one ULP if the default JSON parser reads
+    // its shortest serialized form a second time. SQLite stores the JSON intact.
+    let json = r#"[{"text":"Original text\nGrüße","observed_at_ms":[8020,8030],"bounds":{"x":0.90090990900909906,"y":0.1,"width":0.05,"height":0.04}}]"#;
+    let segments: Vec<ocr_rules::OcrSegment> = serde_json::from_str(json).unwrap();
+    let expected = serde_json::to_string(&vec![ocr_rules::OcrBlock {
+        text: segments[0].text.clone(),
+        bounds: None,
+        confidence: None,
+        metadata_source: "legacy_segment".into(),
+        legacy_segment_bounds: segments[0].bounds.clone(),
+    }])
+    .unwrap();
+    conn.execute("INSERT INTO history_ocr (history_entry_id,text,segments_json,result_created_at,last_attempt_id,last_attempt_status,last_attempt_at) VALUES ('video','old export',?1,123,'old','completed',1)",[json]).unwrap();
+    drop(conn);
+
+    let db = Database::new(database::open(&path).unwrap());
+    let content = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(content.total_count, 2);
+    assert_eq!(
+        content
+            .frames
+            .iter()
+            .map(|f| f.timestamp_ms)
+            .collect::<Vec<_>>(),
+        vec![8020, 8030]
+    );
+    for frame in &content.frames {
+        assert_eq!(frame.full_text, "Original text\nGrüße");
+        let stored: String = db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT blocks_json FROM history_ocr_frames WHERE id=?1",
+                [&frame.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, expected);
+    }
+    assert!(db.lock().unwrap().query_row("SELECT segments_json IS NULL AND text IS NULL FROM history_ocr WHERE history_entry_id='video'", [], |r| r.get::<_,bool>(0)).unwrap());
+    drop(db);
+    let reopened = Database::new(database::open(&path).unwrap());
+    let restarted = ocr_store::get(&reopened, "video").unwrap().unwrap();
+    assert_eq!(restarted.frames, content.frames);
+    assert_eq!(restarted.result_revision, content.result_revision);
+}
+
+#[test]
 fn integration_schema_three_migrates_all_exact_legacy_times_without_inventing_frame_metadata() {
     let root = TempRoot::new("ocr-frame-migration");
     let path = root.path("state.sqlite");
@@ -749,6 +801,39 @@ fn integration_frame_migration_rolls_back_source_retirement_and_can_retry_withou
         ocr_store::get(&reopened, "video").unwrap().unwrap().frames,
         migrated.frames
     );
+}
+
+#[test]
+fn frame_migration_rejects_changed_stored_payloads_without_retiring_source_data() {
+    for column in ["full_text", "blocks_json"] {
+        let db = db();
+        let conn = db.lock().unwrap();
+        let json = r#"[{"text":"Retained text","observed_at_ms":[8020],"bounds":{"x":0.90090990900909906,"y":0.1,"width":0.05,"height":0.04}}]"#;
+        conn.execute("INSERT INTO history_ocr (history_entry_id,text,segments_json,result_created_at,last_attempt_id,last_attempt_status,last_attempt_at) VALUES ('video','old export',?1,123,'old','completed',1)", [json]).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TRIGGER corrupt_frame AFTER INSERT ON history_ocr_frames BEGIN
+             UPDATE history_ocr_frames SET {column}='changed' WHERE id=NEW.id;
+             END;"
+        ))
+        .unwrap();
+        let tx = database::write_transaction(&conn).unwrap();
+        assert_eq!(
+            ocr_store::migrate_frames(&tx).unwrap_err(),
+            "Migrated OCR frame verification failed."
+        );
+        drop(tx);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM history_ocr_frames", [], |r| r
+                .get::<_, u64>(0))
+                .unwrap(),
+            0
+        );
+        let source: (String, String, Option<String>) = conn.query_row(
+            "SELECT text,segments_json,result_revision FROM history_ocr WHERE history_entry_id='video'", [],
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))
+        ).unwrap();
+        assert_eq!(source, ("old export".into(), json.into(), None));
+    }
 }
 
 #[test]

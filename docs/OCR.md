@@ -160,7 +160,9 @@ have `result_format: legacy_text`. No timestamp patterns are inferred from text.
 
 Migration uses the existing required pre-upgrade SQLite snapshot and one
 transaction. Each inserted frame is read back and verified, and counts are checked
-before the source JSON is retired. Rollback retains the original schema and data;
+before the source JSON is retired. Verification compares the stored text and the
+exact serialized block JSON, avoiding false failures from rounding when parsing
+high-precision legacy coordinates again. Rollback retains the original schema and data;
 versioning prevents duplicate transfers on restart. Legacy expansion is streamed
 one frame at a time using references to the bounded source segments, without
 materializing the entire expanded video text. Legacy observations are preserved

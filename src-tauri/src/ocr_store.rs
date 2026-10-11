@@ -319,7 +319,7 @@ fn insert_frame(
     stmt: &mut rusqlite::Statement<'_>,
     id: &str,
     frame: &OcrFrame,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let blocks = serde_json::to_string(&frame.blocks).map_err(|e| e.to_string())?;
     stmt.execute(params![
         frame.id,
@@ -330,7 +330,7 @@ fn insert_frame(
         blocks
     ])
     .map_err(|e| format!("OCR frame could not be saved: {e}"))?;
-    Ok(())
+    Ok(blocks)
 }
 
 // Called only by additive migration 4, under its backup and single transaction.
@@ -396,8 +396,10 @@ pub(crate) fn migrate_frames(conn: &Connection) -> Result<(), String> {
                 full_text: ocr_rules::frame_text(&blocks),
                 blocks,
             };
-            insert_frame(&mut insert, &id, &frame)?;
-            // Verify the transferred frame before retiring its source JSON.
+            let expected_json = insert_frame(&mut insert, &id, &frame)?;
+            // Verify the exact stored payload before retiring its source JSON.
+            // Reparsing JSON floats can change legacy coordinates by one ULP
+            // even when SQLite preserved every byte of the serialized value.
             let (text, json): (String, String) = conn
                 .query_row(
                     "SELECT full_text,blocks_json FROM history_ocr_frames WHERE id=?1",
@@ -405,10 +407,7 @@ pub(crate) fn migrate_frames(conn: &Connection) -> Result<(), String> {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .map_err(|e| e.to_string())?;
-            if text != frame.full_text
-                || serde_json::from_str::<Vec<OcrBlock>>(&json).map_err(|e| e.to_string())?
-                    != frame.blocks
-            {
+            if text != frame.full_text || json != expected_json {
                 return Err("Migrated OCR frame verification failed.".into());
             }
         }

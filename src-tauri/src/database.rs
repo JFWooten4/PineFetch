@@ -260,7 +260,10 @@ pub(super) fn initialize_with_hook(
         tx.execute_batch(OCR_FRAMES_SQL)
             .map_err(|e| format!("SQLite migration 4 failed: {e}"))?;
         crate::ocr_store::migrate_frames(&tx).map_err(|e| {
-            format!("SQLite OCR frame migration failed: {e}. Source data preserved.")
+            format!(
+                "SQLite OCR frame migration failed: {}. Source data preserved.",
+                e.trim_end_matches('.')
+            )
         })?;
         tx.pragma_update(None, "user_version", 4)
             .map_err(|e| e.to_string())?;
