@@ -5,7 +5,7 @@ use crate::download_rules::{prepare_download_job, request_from_preset, DownloadO
 use crate::history::{get_history_details_from_db, list_history_page_from_db};
 use crate::media_tools::{
     build_cut_args, build_transcription_args, build_transcription_audio_args,
-    parse_transcription_line, TranscriptionLine,
+    parse_transcription_line, transcription_failure_message, TranscriptionLine,
 };
 use crate::models::AppConfig;
 use crate::platform::detect_platform;
@@ -249,6 +249,24 @@ fn transcription_parser_distinguishes_language_metadata_and_unchanged_log_lines(
     ] {
         assert_eq!(parse_transcription_line(line), TranscriptionLine::Log(line));
     }
+}
+
+#[test]
+fn transcription_failure_reports_the_native_cause_without_guessing_missing_dependencies() {
+    let detail = "TypeError: open() got an unexpected keyword argument 'metadata_errors'";
+    assert_eq!(
+        transcription_failure_message(1, &format!(" {detail}\n")),
+        format!("faster-whisper failed (exit code 1): {detail}")
+    );
+    assert_eq!(
+        transcription_failure_message(-1, " \n"),
+        "faster-whisper failed (exit code -1); see Settings → Terminal Log for details"
+    );
+    let long_detail = "🌲".repeat(2048);
+    assert_eq!(
+        transcription_failure_message(2, &long_detail),
+        format!("faster-whisper failed (exit code 2): {}", "🌲".repeat(1024))
+    );
 }
 
 #[test]

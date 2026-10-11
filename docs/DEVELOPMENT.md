@@ -48,6 +48,17 @@ shared setup action verifies their availability. It installs the pinned Rust
 toolchain and Node version explicitly. The npm cache only accelerates downloads;
 there is no dependency on a warmed cache or a developer's runtime installations.
 
+Whisper runtime preparation pins both `faster-whisper` and PyAV using
+`scripts/whisper-runtime.version` and `scripts/whisper-av.version` on macOS and
+Windows. `faster-whisper 1.2.1` calls `av.open(metadata_errors=...)`, which
+[PyAV 19 no longer accepts](https://github.com/SYSTRAN/faster-whisper/issues/1589).
+The compatible PyAV pin also retains Python 3.10 support. Existing runtime caches
+without that pin are rebuilt. `scripts/check-whisper-runtime.py` verifies the
+installed versions and decodes generated PCM audio before a runtime is marked
+ready or reused. It needs no Whisper model or model download. Transcription
+failures report the last nonempty stderr line; the complete traceback remains in
+Settings → Terminal Log.
+
 ## Install and check
 
 ```sh

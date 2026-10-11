@@ -8,8 +8,13 @@ $DenoRuntimeDir = Join-Path $ResourcesDir "deno-runtime"
 $DenoRuntimeBinDir = Join-Path $DenoRuntimeDir "bin"
 $WhisperRuntimeDir = Join-Path $ResourcesDir "whisper-runtime"
 $WhisperVersion = (Get-Content (Join-Path $PSScriptRoot "whisper-runtime.version") -Raw).Trim()
+$AvVersion = (Get-Content (Join-Path $PSScriptRoot "whisper-av.version") -Raw).Trim()
+$WhisperRuntimeCheck = Join-Path $PSScriptRoot "check-whisper-runtime.py"
 if ($WhisperVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
     throw "Invalid faster-whisper version in scripts/whisper-runtime.version."
+}
+if ($AvVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+    throw "Invalid PyAV version in scripts/whisper-av.version."
 }
 
 function Resolve-ToolPath {
@@ -145,14 +150,11 @@ $reuseWhisperRuntime = $false
 if ((Test-Path $runtimePython) -and (Test-Path $runtimeMetadata)) {
     $metadata = Get-Content $runtimeMetadata
     if (($metadata -contains "faster-whisper=$WhisperVersion") -and
+        ($metadata -contains "av=$AvVersion") -and
         ($metadata -contains "python=$sourcePythonVersion")) {
         try {
-            $installedVersion = [string](& $runtimePython -c "import faster_whisper; print(faster_whisper.__version__)" 2>$null)
-            $importSucceeded = $LASTEXITCODE -eq 0
-            $installedPythonVersion = [string](& $runtimePython -c "import sys; print(sys.version.split()[0])" 2>$null)
-            $reuseWhisperRuntime = $importSucceeded -and $LASTEXITCODE -eq 0 -and
-                $installedVersion.Trim() -eq $WhisperVersion -and
-                $installedPythonVersion.Trim() -eq $sourcePythonVersion
+            & $runtimePython $WhisperRuntimeCheck $WhisperVersion $AvVersion $sourcePythonVersion 2>$null | Out-Null
+            $reuseWhisperRuntime = $LASTEXITCODE -eq 0
         } catch {
             $reuseWhisperRuntime = $false
         }
@@ -172,8 +174,13 @@ if ($reuseWhisperRuntime) {
 
     Invoke-Checked `
         -FilePath $runtimePython `
-        -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "faster-whisper==$WhisperVersion") `
-        -Label "faster-whisper install"
+        -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "faster-whisper==$WhisperVersion", "av==$AvVersion") `
+        -Label "faster-whisper and PyAV install"
+
+    Invoke-Checked `
+        -FilePath $runtimePython `
+        -Arguments @($WhisperRuntimeCheck, $WhisperVersion, $AvVersion, $sourcePythonVersion) `
+        -Label "Whisper audio decode check"
 
     $fasterWhisperVersion = [string](& $runtimePython -c "import faster_whisper; print(faster_whisper.__version__)")
     if ($LASTEXITCODE -ne 0 -or $fasterWhisperVersion.Trim() -ne $WhisperVersion) {
@@ -185,6 +192,7 @@ if ($reuseWhisperRuntime) {
     }
     @"
 faster-whisper=$fasterWhisperVersion
+av=$AvVersion
 python=$runtimePythonVersion
 "@ | Set-Content -Encoding UTF8 $runtimeMetadata
     "placeholder for source control" | Set-Content -Encoding UTF8 (Join-Path $WhisperRuntimeDir ".keep")
@@ -199,3 +207,4 @@ Write-Host "Windows deno runtime ready at: $DenoRuntimeDir"
 Write-Host "deno: $denoVersion"
 Write-Host "Windows whisper runtime ready at: $WhisperRuntimeDir"
 Write-Host "faster-whisper: $fasterWhisperVersion"
+Write-Host "PyAV: $AvVersion"

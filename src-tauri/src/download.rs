@@ -11,7 +11,7 @@ use crate::files::OwnedTemporaryFile;
 use crate::files::TemporaryTranscriptionAudio;
 use crate::media_tools::{
     build_cut_args, build_transcription_args, build_transcription_audio_args,
-    parse_transcription_line, TranscriptionLine,
+    parse_transcription_line, transcription_failure_message, TranscriptionLine,
 };
 use crate::metadata::INFO_TIMEOUT;
 use crate::models::DownloadJob;
@@ -716,9 +716,13 @@ pub(super) fn run_faster_whisper_transcription(
     let app_stderr = app.clone();
     let job_id_stderr = job.id.clone();
     let handle_err = thread::spawn(move || {
+        let mut last_error = String::new();
         if let Some(err) = stderr {
             let reader = BufReader::new(err);
             for line in reader.lines().map_while(Result::ok) {
+                if !line.trim().is_empty() {
+                    last_error = line.trim().chars().take(1024).collect();
+                }
                 emit_log(
                     &app_stderr,
                     LogEvent {
@@ -729,6 +733,7 @@ pub(super) fn run_faster_whisper_transcription(
                 );
             }
         }
+        last_error
     });
 
     let status = loop {
@@ -745,13 +750,11 @@ pub(super) fn run_faster_whisper_transcription(
     };
     clear_current_child(&state.processes, &child);
     let _ = handle_out.join();
-    let _ = handle_err.join();
+    let stderr_line = handle_err.join().unwrap_or_default();
 
     if !status.success() {
         let code = status.code().unwrap_or(-1);
-        return Err(format!(
-      "faster-whisper failed (exit code {code}). Ensure Python deps are installed (`pip install faster-whisper`)."
-    ));
+        return Err(transcription_failure_message(code, &stderr_line));
     }
 
     if !transcript_path.exists() {

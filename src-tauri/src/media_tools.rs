@@ -74,6 +74,15 @@ pub(crate) fn parse_transcription_line(line: &str) -> TranscriptionLine<'_> {
     }
 }
 
+pub(crate) fn transcription_failure_message(code: i32, stderr_line: &str) -> String {
+    let detail: String = stderr_line.trim().chars().take(1024).collect();
+    if detail.is_empty() {
+        format!("faster-whisper failed (exit code {code}); see Settings → Terminal Log for details")
+    } else {
+        format!("faster-whisper failed (exit code {code}): {detail}")
+    }
+}
+
 const FASTER_WHISPER_TRANSCRIBE_SNIPPET: &str = r#"
 import sys
 from pathlib import Path
