@@ -116,16 +116,26 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         state.frameImage = '';
         state.frameError = '';
         renderResults();
+        let timer;
         try {
-            const image = await api.getHistoryOcrFrame({ id, selection: selected });
+            const image = await Promise.race([
+                api.getHistoryOcrFrame({ id, selection: selected }),
+                new Promise((_, reject) => {
+                    timer = setTimeout(() => reject(new Error('Frame preview timed out.')), 30000);
+                }),
+            ]);
             if (id !== state.id || request !== state.frameRequest || !visible() || state.disposed) return;
             state.frameImage = image;
         } catch (error) {
             appendLog(`[OCR frame] ${error}`, true);
             if (id !== state.id || request !== state.frameRequest || !visible() || state.disposed) return;
-            state.frameError = /changed/i.test(String(error))
-                ? 'The saved video or OCR results changed. Reopen OCR or run the analysis again.'
-                : 'The selected frame is unavailable. Check that the saved video and FFmpeg are available.';
+            state.frameError = /timed out/i.test(String(error))
+                ? 'The frame took too long to load. Select the text to try again.'
+                : /changed/i.test(String(error))
+                  ? 'The saved video or OCR results changed. Reopen OCR or run the analysis again.'
+                  : 'The selected frame is unavailable. Check that the saved video and FFmpeg are available.';
+        } finally {
+            clearTimeout(timer);
         }
         state.frameLoading = false;
         renderPreview();

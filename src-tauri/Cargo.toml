@@ -40,3 +40,10 @@ custom-protocol = ["tauri/custom-protocol"]
 # See vendor/README.md for the upstream source and removal criteria.
 [patch.crates-io]
 glib = { path = "vendor/glib" }
+
+# Full-video SHA checks must remain fast while the app itself stays debuggable.
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.test.package.sha2]
+opt-level = 3

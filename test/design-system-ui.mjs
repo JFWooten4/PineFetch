@@ -1111,6 +1111,26 @@ try {
             assert(await page.locator('#historyOcrPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
             await page.screenshot({ path: `/tmp/pinefetch-ocr-frame-${engine.name()}.png` });
             await page.setViewportSize({ width: 1400, height: 960 });
+            await page.clock.install();
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdFrame = true;
+                globalThis.__pinefetchUi.releaseFrame = null;
+            });
+            await page.locator('.pinefetch-ocr-select').first().click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseFrame));
+            assert.equal(await page.locator('#historyOcrFrameStatus').textContent(), 'Loading selected frame…');
+            await page.clock.fastForward(30001);
+            await page.clock.resume();
+            await page.waitForFunction(() =>
+                globalThis.document.querySelector('#historyOcrFrameStatus').textContent.includes('too long')
+            );
+            assert.equal(await page.locator('#historyOcrPreview').getAttribute('aria-busy'), 'false');
+            assert(await page.locator('#historyOcrFrame').isHidden());
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseFrame());
+            assert(await page.locator('#historyOcrFrame').isHidden());
+            await page.locator('.pinefetch-ocr-select').nth(1).click();
+            await page.locator('#historyOcrFrame').waitFor();
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:04');
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.failNextOcrDelete = true;
             });

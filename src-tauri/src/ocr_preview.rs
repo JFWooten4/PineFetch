@@ -10,8 +10,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{atomic::Ordering, Mutex};
-use std::time::Duration;
+use std::sync::{atomic::Ordering, Mutex, TryLockError};
+use std::time::{Duration, Instant};
 
 struct VerifiedSource {
     path: PathBuf,
@@ -19,10 +19,19 @@ struct VerifiedSource {
     hash: String,
 }
 
-#[derive(Default)]
 pub(crate) struct OcrPreviewState {
     // Serialize extraction and cache only a verified file identity, never frames.
     source: Mutex<Option<VerifiedSource>>,
+    timeout: Duration,
+}
+
+impl Default for OcrPreviewState {
+    fn default() -> Self {
+        Self {
+            source: Mutex::new(None),
+            timeout: Duration::from_secs(25),
+        }
+    }
 }
 
 pub(crate) fn frame_command(tool: &Path, path: &Path, index: u64, time_ms: u64) -> Command {
@@ -39,6 +48,25 @@ pub(crate) fn frame_command(tool: &Path, path: &Path, index: u64, time_ms: u64) 
 }
 
 impl OcrPreviewState {
+    #[cfg(test)]
+    pub(crate) fn with_timeout(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            ..Self::default()
+        }
+    }
+
+    fn remaining(&self, deadline: Instant, processes: &ProcessState) -> Result<Duration, String> {
+        if processes.shutting_down.load(Ordering::SeqCst) {
+            return Err("Application is shutting down.".into());
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("Frame preview timed out.".into());
+        }
+        Ok(remaining)
+    }
+
     pub(crate) fn frame(
         &self,
         db: &Database,
@@ -48,7 +76,15 @@ impl OcrPreviewState {
         ffmpeg: &Path,
         ffprobe: &Path,
     ) -> Result<String, String> {
-        let mut cached = self.source.lock().map_err(|_| "Preview lock poisoned")?;
+        let deadline = Instant::now() + self.timeout;
+        let mut cached = loop {
+            self.remaining(deadline, processes)?;
+            match self.source.try_lock() {
+                Ok(source) => break source,
+                Err(TryLockError::Poisoned(_)) => return Err("Preview lock poisoned".into()),
+                Err(TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        };
         let content = ocr_store::get(db, id)?.ok_or("No saved OCR result is available.")?;
         ocr_store::validate_selection(&content, selection)?;
         let hash = content
@@ -65,9 +101,7 @@ impl OcrPreviewState {
             let mut digest = Sha256::new();
             let mut bytes = [0u8; 65536];
             loop {
-                if processes.shutting_down.load(Ordering::SeqCst) {
-                    return Err("Application is shutting down.".into());
-                }
+                self.remaining(deadline, processes)?;
                 let count = file.read(&mut bytes).map_err(|e| e.to_string())?;
                 if count == 0 {
                     break;
@@ -93,7 +127,7 @@ impl OcrPreviewState {
             probe,
             None,
             Some(processes),
-            Some(Duration::from_secs(30)),
+            Some(self.remaining(deadline, processes)?),
         )
         .map_err(String::from)?;
         if !probe.status.success() {
@@ -104,7 +138,7 @@ impl OcrPreviewState {
             frame_command(ffmpeg, path, index, selection.observed_at_ms),
             None,
             Some(processes),
-            Some(Duration::from_secs(30)),
+            Some(self.remaining(deadline, processes)?),
         )
         .map_err(String::from)?;
         let time = String::from_utf8_lossy(&output.stderr)
@@ -123,6 +157,7 @@ impl OcrPreviewState {
         }
         let current = ocr_store::get(db, id)?.ok_or("The OCR result is no longer available.")?;
         ocr_store::validate_selection(&current, selection)?;
+        self.remaining(deadline, processes)?;
         Ok(format!(
             "data:image/png;base64,{}",
             STANDARD.encode(output.stdout)

@@ -727,6 +727,63 @@ const FRAME: &str = r#"printf '%s\n' '{"type":"frame","frame_id":0,"observations
 
 #[cfg(unix)]
 #[test]
+fn integration_ocr_preview_timeout_reaps_tools_and_allows_retry() {
+    let root = TempRoot::new("ocr-preview-timeout");
+    let path = root.path("saved.mp4");
+    fs::write(&path, b"synthetic video").unwrap();
+    let db = db();
+    db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE history_entries SET output_path=?1 WHERE id='video'",
+            [path.to_str().unwrap()],
+        )
+        .unwrap();
+    let mut saved = result("Text");
+    saved.segments[0].observed_at_ms = vec![1310];
+    saved.source_sha256 = crate::hashing::sha256_from_path(path.to_str())
+        .unwrap()
+        .unwrap();
+    ocr_store::begin(&db, "video", "preview").unwrap();
+    ocr_store::finish(&db, "video", "preview", &saved).unwrap();
+    let content = ocr_store::get(&db, "video").unwrap().unwrap();
+    let selected = selection(&content, 0, 1310);
+    let normal = tools(&root, "exit 0");
+    let hang = script(&root, "hung-tool", "exec /bin/sleep 60");
+    let preview = crate::ocr_preview::OcrPreviewState::with_timeout(Duration::from_secs(1));
+    let processes = crate::process::ProcessState::default();
+    for (extractor, probe) in [(&normal.ffmpeg, &hang), (&hang, &normal.ffprobe)] {
+        let started = Instant::now();
+        let error = preview
+            .frame(&db, &processes, "video", &selected, extractor, probe)
+            .unwrap_err();
+        assert!(error.contains("timed out"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(6));
+        assert!(processes.utility_children.lock().unwrap().is_empty());
+        assert_eq!(
+            ocr_store::get(&db, "video")
+                .unwrap()
+                .unwrap()
+                .result_revision,
+            content.result_revision
+        );
+    }
+    assert!(preview
+        .frame(
+            &db,
+            &processes,
+            "video",
+            &selected,
+            &normal.ffmpeg,
+            &normal.ffprobe
+        )
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+    assert!(processes.utility_children.lock().unwrap().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
 fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_exit() {
     let root = TempRoot::new("ocr-protocol");
     let path = root.path("saved.mp4");

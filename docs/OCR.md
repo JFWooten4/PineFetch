@@ -20,8 +20,13 @@ verifies the extracted timestamp, including variable frame intervals and nonzero
 origins. Previews are bounded to 1280 × 720 and returned as PNG data URLs without
 writing frames to disk. Source SHA-256 is verified once per unchanged file identity;
 changed or missing videos produce a preview error while saved text remains readable.
-Preview utilities have a 30-second process timeout and app-exit cleanup, independent
-of OCR cancellation. Late replies cannot replace another selection or entry.
+Previews have a 25-second native deadline covering cache-lock waiting, source
+verification and both utility executions, plus app-exit cleanup independent of OCR
+cancellation. The UI ends an unanswered request after 30 seconds with a retry
+message; a late reply cannot replace that error, another selection or another entry.
+SHA-256 compression is optimized in dev/test builds so large saved videos do not
+spend tens of seconds in an unoptimized hash loop before their first preview.
+The application itself keeps its normal debug build settings.
 
 Each observation has a **Delete** button. It removes only that text occurrence at
 its timestamp, retaining other observations of the same segment. Empty segments
@@ -207,11 +212,13 @@ and 213 Rust tests, including 15 OCR tests), Chromium/WebKit background-navigati
 filter/scroll retention, retry, search, pagination and copying checks, and
 1000 × 960 layout checks.
 The frame overview and observation deletion additionally pass the complete gates
-(50 JavaScript and 216 Rust tests), keyboard selection, out-of-order previews,
+(50 JavaScript and 217 Rust tests), keyboard selection, out-of-order previews,
 delete failure/persistence/count/copy checks and Chromium/WebKit 1000 × 960 layout
 checks. The native preview regression compares PNGs from fast seeks with an
 independent full decode of synthetic VFR frames with a nonzero timestamp origin,
 then verifies changed-source and stale-selection rejection.
+Timeout regressions cover stalled probe/extraction tools, child cleanup and retry,
+as well as ending a stuck UI request and ignoring its late response.
 The unchanged native OCR engine was separately verified on macOS 26.7 arm64:
 real Vision revision 3 with `de-DE`/`en-US`, VFR times 0/1120/2400/3520 ms, a real
 Tauri app bundle, existing ad-hoc deep signing/strict verification, and the bundled
