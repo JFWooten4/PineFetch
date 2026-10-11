@@ -20,6 +20,8 @@ export const createTauriClient = tauri => {
         getHistoryDetails: args => invoke('get_history_details', args),
         getHistoryOcr: args => invoke('get_history_ocr', args),
         getHistoryOcrProgress: args => invoke('get_history_ocr_progress', args),
+        getHistoryOcrFrame: args => invoke('get_history_ocr_frame', args),
+        deleteHistoryOcrObservation: args => invoke('delete_history_ocr_observation', args),
         startHistoryOcr: args => invoke('start_history_ocr', args),
         cancelHistoryOcr: args => invoke('cancel_history_ocr', args),
         getHistoryStats: args => invoke('get_history_stats', args),

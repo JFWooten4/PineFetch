@@ -16,6 +16,7 @@ pub(crate) struct AppState {
     pub(crate) queue: QueueState,
     pub(crate) processes: ProcessState,
     pub(crate) ocr: Arc<crate::ocr::OcrState>,
+    pub(crate) ocr_preview: crate::ocr_preview::OcrPreviewState,
     pub(crate) link_dump_server: Mutex<LinkDumpServerRuntime>,
 }
 impl AppState {
@@ -27,6 +28,7 @@ impl AppState {
             queue: QueueState::default(),
             processes: ProcessState::default(),
             ocr: Arc::new(crate::ocr::OcrState::default()),
+            ocr_preview: crate::ocr_preview::OcrPreviewState::default(),
             link_dump_server: Mutex::new(LinkDumpServerRuntime::default()),
         }
     }

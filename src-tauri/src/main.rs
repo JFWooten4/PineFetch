@@ -32,6 +32,7 @@ mod media_tools;
 mod metadata;
 mod models;
 mod ocr;
+mod ocr_preview;
 mod ocr_rules;
 mod ocr_store;
 #[cfg(test)]
@@ -144,6 +145,8 @@ fn main() {
             commands::cancel_history_ocr,
             commands::get_history_ocr,
             commands::get_history_ocr_progress,
+            commands::get_history_ocr_frame,
+            commands::delete_history_ocr_observation,
             commands::remove_history_entry,
             commands::clear_history,
             commands::get_link_dump_overview,

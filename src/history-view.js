@@ -2,6 +2,7 @@ import { confirmDialog } from './vendor/oj/index.js';
 import { createDropdownChoice } from './dropdown-choice.js';
 import { formatHistorySource, formatLocalDateTime, formatUploadDate } from './formatters.js';
 import { createHistoryDetailsView } from './history-details-view.js';
+import { createHistoryOcrJobs, ocrActive } from './history-ocr-jobs.js';
 
 export const createHistoryView = ({
     els,
@@ -26,11 +27,15 @@ export const createHistoryView = ({
         historySource: '',
         historyExactUser: false,
         historyClearing: false,
+        page: 'list',
+        selectedId: null,
+        scrollTop: 0,
     });
     const historyPageSize = 20;
     const historySearchDelayMs = 250;
     let historySearchTimer = null;
     let historySources = [];
+    const jobs = createHistoryOcrJobs({ api, appendLog });
     const searchFieldChoice = createDropdownChoice({
         menu: els.historySearchFieldMenu,
         value: els.historySearchFieldValue,
@@ -51,7 +56,37 @@ export const createHistoryView = ({
         formatDuration,
         detectPlatform,
         showSavedVideosByCreator: creator => showSavedVideosByCreator(creator),
+        jobs,
+        navigateToDetails: id => {
+            if (state.page === 'list') state.scrollTop = els.historyList.scrollTop;
+            state.page = 'detail';
+            state.selectedId = id;
+            activate();
+        },
+        navigateToHistory: returnFocus => {
+            historyDetailsView.leave();
+            state.page = 'list';
+            state.selectedId = null;
+            activate();
+            void renderHistory().then(() => {
+                els.historyList.scrollTop = state.scrollTop;
+                if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+                else els.historySearchInput.focus({ preventScroll: true });
+            });
+        },
     });
+
+    const activate = () => {
+        const detail = isActive() && state.page === 'detail';
+        const list = isActive() && !detail;
+        els.historyDetailsView.hidden = !detail;
+        els.historyView.hidden = !list;
+        els.historySummaryView.hidden = !list;
+        els.historyView.closest('.pinefetch-split').classList.toggle('pinefetch-history-details-active', detail);
+        updateHistoryResultCount();
+        historyDetailsView.hideContextMenu();
+        historyDetailsView.activate();
+    };
 
     const formatHistoryDate = timestamp => {
         if (!timestamp) return '-';
@@ -91,7 +126,7 @@ export const createHistoryView = ({
     const updateHistoryResultCount = () => {
         const hasCount = Boolean(state.historyQuery) && state.historyTotalCount !== null;
         els.historyResultCount.textContent = hasCount ? `${state.historyTotalCount.toLocaleString()} found` : '';
-        els.historyResultCount.hidden = !isActive() || !hasCount;
+        els.historyResultCount.hidden = !isActive() || state.page === 'detail' || !hasCount;
     };
 
     const updateHistoryActions = () => {
@@ -188,24 +223,11 @@ export const createHistoryView = ({
         const openBtn = document.createElement('button');
         openBtn.type = 'button';
         openBtn.className = `pinefetch-history-open-btn pinefetch-list-card-layout ${entry.thumbnail ? '' : 'pinefetch-no-media'}`;
-        openBtn.setAttribute('aria-label', `Open downloaded file: ${entryLabel}`);
+        openBtn.setAttribute('aria-label', `Open video details: ${entryLabel}`);
         openBtn.setAttribute('aria-haspopup', 'menu');
         openBtn.setAttribute('aria-controls', 'historyContextMenu');
 
-        openBtn.onclick = async () => {
-            // Rust uses snake_case: output_path, not outputPath
-            const outputPath = entry.output_path || entry.outputPath;
-            if (outputPath && api.available) {
-                try {
-                    const exists = await api.openFilePath({ path: outputPath });
-                    if (!exists) {
-                        appendLog(`[history] File not found: ${outputPath}`, true);
-                    }
-                } catch (err) {
-                    appendLog(`[open] ${err}`, true);
-                }
-            }
-        };
+        openBtn.onclick = () => void historyDetailsView.open(entry.id, openBtn);
 
         const content = document.createElement('div');
         content.className = 'pinefetch-history-content';
@@ -229,6 +251,11 @@ export const createHistoryView = ({
             dateStr,
         ]);
         content.appendChild(meta);
+        const ocrIndicator = document.createElement('span');
+        ocrIndicator.className = 'oj-caption pinefetch-history-ocr-indicator';
+        ocrIndicator.dataset.ocrHistoryId = entry.id;
+        renderOcrIndicator(ocrIndicator, jobs.get(entry.id));
+        content.appendChild(ocrIndicator);
 
         openBtn.appendChild(content);
 
@@ -265,6 +292,7 @@ export const createHistoryView = ({
 
     const renderHistory = async ({ append = false, force = false } = {}) => {
         updateHistoryResultCount();
+        if (state.page === 'detail') return;
         if (!append && !force && state.historyLoaded && !state.historyDirty) return;
 
         if (!api.available) {
@@ -304,6 +332,7 @@ export const createHistoryView = ({
                 return;
             }
             const entries = Array.isArray(page) ? page : page?.entries || [];
+            jobs.adoptSummaries(page?.ocr_statuses);
             const hasMore = Array.isArray(page)
                 ? entries.length === historyPageSize
                 : Boolean(page?.has_more ?? page?.hasMore);
@@ -365,6 +394,20 @@ export const createHistoryView = ({
     };
 
     const bindEvents = () => {
+        jobs.bindEvents();
+        const unsubscribeJobs = jobs.subscribe((id, record) => {
+            for (const indicator of els.historyList.querySelectorAll('[data-ocr-history-id]')) {
+                if (indicator.dataset.ocrHistoryId === id) renderOcrIndicator(indicator, record);
+            }
+        });
+        window.addEventListener(
+            'pagehide',
+            () => {
+                unsubscribeJobs();
+                jobs.dispose();
+            },
+            { once: true }
+        );
         historyDetailsView.bindEvents();
         const searchPlaceholders = {
             title: 'Search titles',
@@ -464,8 +507,31 @@ export const createHistoryView = ({
     const onChanged = () => {
         historyDetailsView.hideContextMenu();
         invalidateHistoryCache();
-        if (isActive()) void renderHistory({ force: true });
+        if (isActive() && state.page === 'list') void renderHistory({ force: true });
     };
 
-    return Object.freeze({ render: renderHistory, bindEvents, onChanged });
+    const renderOcrIndicator = (element, record) => {
+        const labels = {
+            queued: 'OCR pending',
+            running: 'OCR processing',
+            completed: 'OCR completed',
+            failed: 'OCR failed',
+            cancelled: 'OCR cancelled',
+            interrupted: 'OCR interrupted',
+        };
+        const label = labels[record?.status];
+        element.hidden = !label;
+        element.replaceChildren();
+        if (!label) return;
+        element.title = label;
+        const icon = document.createElement('i');
+        icon.className = ocrActive(record.status)
+            ? 'oj-spinner'
+            : record.status === 'completed'
+              ? 'fa-solid fa-font'
+              : 'fa-solid fa-circle-exclamation';
+        icon.setAttribute('aria-hidden', 'true');
+        element.append(icon, document.createTextNode(label));
+    };
+    return Object.freeze({ render: renderHistory, bindEvents, onChanged, activate });
 };

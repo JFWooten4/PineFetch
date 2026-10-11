@@ -162,7 +162,7 @@ try {
     await page.locator('#historyShowMoreDataBtn').click();
     await page.locator('#historyDetailsContent').waitFor({ state: 'visible' });
     await capture('more_data.webp');
-    await page.locator('#historyDetailsCloseBtn').click();
+    await page.locator('#historyDetailsBackBtn').click();
 
     await page.locator('#viewLinkDumpBtn').click();
     await page.waitForFunction(

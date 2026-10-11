@@ -160,6 +160,17 @@ pub(crate) fn start(
     if state.owner.is_none() {
         return Err("OCR is owned by another PineFetch instance. Close that instance before starting an analysis here.".into());
     }
+    // Reopening or clicking Start twice returns the existing attempt, including
+    // while source preparation is running. The lock also guards job creation.
+    let mut active = state.active.lock().map_err(|_| "OCR state lock poisoned")?;
+    if let Some(current) = active.as_ref() {
+        if current.history_id == id && current.status == "running" {
+            return Ok(current.clone());
+        }
+        return Err(
+            "An OCR analysis is already running. Cancel it or wait for it to finish.".into(),
+        );
+    }
     let path = PathBuf::from(ocr_store::saved_path(&db, &id)?);
     validate_source(&path)?;
     let progress = OcrProgress {
@@ -174,12 +185,6 @@ pub(crate) fn start(
         total_frames_is_estimate: false,
         message: None,
     };
-    let mut active = state.active.lock().map_err(|_| "OCR state lock poisoned")?;
-    if active.is_some() {
-        return Err(
-            "An OCR analysis is already running. Cancel it or wait for it to finish.".into(),
-        );
-    }
     state.processes.shutting_down.store(false, Ordering::SeqCst);
     ocr_store::begin(&db, &progress.history_id, &progress.attempt_id)?;
     *active = Some(progress.clone());
@@ -332,7 +337,7 @@ pub(crate) fn validate_source(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub(crate) struct Fingerprint {
     size: u64,
     modified: std::time::SystemTime,

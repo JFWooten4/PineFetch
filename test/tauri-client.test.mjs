@@ -16,6 +16,8 @@ const commands = {
     getHistoryDetails: 'get_history_details',
     getHistoryOcr: 'get_history_ocr',
     getHistoryOcrProgress: 'get_history_ocr_progress',
+    getHistoryOcrFrame: 'get_history_ocr_frame',
+    deleteHistoryOcrObservation: 'delete_history_ocr_observation',
     startHistoryOcr: 'start_history_ocr',
     cancelHistoryOcr: 'cancel_history_ocr',
     getHistoryStats: 'get_history_stats',

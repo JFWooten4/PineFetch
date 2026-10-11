@@ -1,11 +1,34 @@
 # Local video OCR
 
-Right-click a History entry and choose **Check for OCR**. An accepted start opens
-History Details on **OCR text**. Opening that tab by itself only loads saved data.
-One analysis may run at a time. Closing the dialog lets it continue; **Cancel**
-stops only OCR. **Copy text** includes all observed timestamps. All processing
-and persistence are local; no player, gallery, automatic analysis, search or export
-is added.
+Open a History entry to use its full-container detail workspace, or right-click
+and choose **Open OCR** to select **OCR Text** directly. Opening the tab never
+starts analysis. **Start OCR Analysis**, **Run OCR Again**, **Retry Analysis** and
+**Start Again** explicitly start a job. One analysis may run at a time.
+**Back to History**, other tabs and the global navigation leave it running;
+**Cancel Analysis** is the only navigation-independent cancellation action.
+History preserves its query, filters, loaded entries and scroll position.
+The header displays the thumbnail during analysis and after completion.
+Detected observations are chronological, searchable locally and displayed in
+pages of 100. **Copy All Text** copies every observation's precise timestamps,
+including text excluded by the current search. All processing and persistence
+remain local; no player, cloud service or transcription engine is added.
+
+Selecting a timestamp or detected text shows its actual saved-video frame in the
+fixed overview above the independently scrolling results, alongside the timestamp
+and selected text. FFmpeg seeks on the same normalized local PTS timeline and
+verifies the extracted timestamp, including variable frame intervals and nonzero
+origins. Previews are bounded to 1280 × 720 and returned as PNG data URLs without
+writing frames to disk. Source SHA-256 is verified once per unchanged file identity;
+changed or missing videos produce a preview error while saved text remains readable.
+Preview utilities have a 30-second process timeout and app-exit cleanup, independent
+of OCR cancellation. Late replies cannot replace another selection or entry.
+
+Each observation has a **Delete** button. It removes only that text occurrence at
+its timestamp, retaining other observations of the same segment. Empty segments
+are removed; saved readable text, search, counts and copying update together.
+Deleting the last observation leaves a valid empty saved result. Deletion persists
+across restart and is disabled during analysis. A later successful **Run OCR Again**
+replaces the edited result with newly recognized observations.
 
 Only the entry's saved absolute `output_path` is eligible. FFprobe must identify
 a real video stream, excluding attached cover art. Missing files, audio,
@@ -84,6 +107,13 @@ by a late result. No DB mutex or transaction spans decoding, Vision or hashing.
 Source inode, size, mtime/ctime and a second SHA-256 verify the same file version;
 the source identity and saved History path are rechecked before commit.
 
+Result DTOs include a derived `result_revision` digest of source identity, result
+timestamp and stored segment JSON. Preview and delete selections contain that
+revision, segment index and observed time. Deletion validates them in an immediate
+transaction and rewrites segments and readable text atomically; stale selections,
+running analyses and failed writes leave the result intact. This adds no column or
+migration and preserves engine/source metadata and the analysis timestamp.
+
 OCR has its own process registry and finalization lock. Accepted cancellation
 before finalization prevents success. Exit kills/reaps its processes and joins
 the worker. `ocr-owner.lock` is a persistent inode with a kernel advisory lock;
@@ -108,9 +138,23 @@ The bar stays below 100% during final source checks and saving;
 the status reads **Finishing OCR…**. Missing duration keeps the bar
 indeterminate and unknown totals are shown explicitly. Missing or failed
 thumbnails do not reserve an empty image column.
-Contents load on demand; entry/request/attempt
-guards reject late data. Subscriptions are cleaned up on page exit. OCR is
-rendered with `textContent`, including when copied with readable timestamps.
+`history-ocr-jobs.js` owns one app-wide event subscription and normalized job
+states: `not_started`, `queued`, `running`, `completed`, `failed`, `cancelled`
+and `interrupted`. `queued` represents a start request awaiting acknowledgement,
+not an additional native processing queue. The backend's `error` status remains
+compatible with schema 3 and maps to `failed` in the UI. Duplicate starts return
+the existing native attempt; pending frontend requests are also deduplicated.
+History pages include compact OCR summaries via one LEFT JOIN, without loading
+OCR text or issuing a query per entry. Events update visible History indicators
+even when another detail or app view is selected. Lazy result/progress snapshots
+use revisions and attempt guards to reject stale data. Listener cleanup occurs
+on app-page exit, never on detail navigation. Results use `textContent` and
+previous results remain available until a successful rerun replaces them.
+
+The existing SQLite schema 3 is sufficient; this UI redesign adds no migration.
+Completed results survive restart and interrupted native jobs retain the existing
+orphan recovery behavior. Progress is live in memory rather than restored after
+restart. Internal errors are logged; the UI shows concise recovery instructions.
 
 ## Build and checks
 
@@ -158,11 +202,20 @@ and runs the helper from an isolated cwd/system PATH. Its optional first argumen
 is the packaged helper path. Developer tools generate this test fixture only;
 the shipped helper does not use them. No release/publishing occurs.
 
-Verified on macOS 26.7 arm64: the complete check/build gates (44 JavaScript and
-211 Rust tests, including 13 OCR tests), Chromium/WebKit interaction checks and
-1000 × 960 layout checks, real Vision revision 3 with `de-DE`/`en-US`, VFR times
-0/1120/2400/3520 ms, a real Tauri app bundle, existing ad-hoc deep signing/strict
-verification, and the bundled helper smoke with isolated cwd/PATH. Intel and
+The detail-workspace redesign passes the complete check/build gates (50 JavaScript
+and 213 Rust tests, including 15 OCR tests), Chromium/WebKit background-navigation,
+filter/scroll retention, retry, search, pagination and copying checks, and
+1000 × 960 layout checks.
+The frame overview and observation deletion additionally pass the complete gates
+(50 JavaScript and 216 Rust tests), keyboard selection, out-of-order previews,
+delete failure/persistence/count/copy checks and Chromium/WebKit 1000 × 960 layout
+checks. The native preview regression compares PNGs from fast seeks with an
+independent full decode of synthetic VFR frames with a nonzero timestamp origin,
+then verifies changed-source and stale-selection rejection.
+The unchanged native OCR engine was separately verified on macOS 26.7 arm64:
+real Vision revision 3 with `de-DE`/`en-US`, VFR times 0/1120/2400/3520 ms, a real
+Tauri app bundle, existing ad-hoc deep signing/strict verification, and the bundled
+helper smoke with isolated cwd/PATH. Intel and
 older-macOS runtime behavior remain unverified, as does an interactive native
 WebView smoke; browser checks use isolated native API fixtures. Windows/Linux
 builds were not run in this macOS environment. No notarization or release was
@@ -172,7 +225,7 @@ The edge-box fix also passed all 60 selected full-resolution frames in the first
 minute of the reported 4K video, through the real Vision helper and strict Rust
 response validation, including the former failures at 9 and 48 seconds. This
 diagnostic did not modify the personal History database or save an OCR result;
-the entry needs a new **Check for OCR** run in the updated app.
+the entry needs a new **Run OCR Again** action in the updated app.
 
 The dev watcher regression was checked with `npm run dev -- -- -- --version`:
 touching the generated helper after watching starts does not restart the build,

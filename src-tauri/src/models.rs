@@ -203,8 +203,18 @@ pub(crate) struct HistoryEntry {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct HistoryPage {
     pub(crate) entries: Vec<HistoryEntry>,
+    pub(crate) ocr_statuses: Vec<HistoryOcrSummary>,
     pub(crate) has_more: bool,
     pub(crate) total_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct HistoryOcrSummary {
+    pub(crate) history_id: String,
+    pub(crate) attempt_id: String,
+    pub(crate) attempt_at: u64,
+    pub(crate) status: String,
+    pub(crate) result_created_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -450,6 +460,7 @@ pub(crate) struct OcrContent {
     pub(crate) history_entry_id: String,
     pub(crate) text: Option<String>,
     pub(crate) segments: Option<Vec<crate::ocr_rules::OcrSegment>>,
+    pub(crate) result_revision: Option<String>,
     pub(crate) source_sha256: Option<String>,
     pub(crate) engine: Option<String>,
     pub(crate) engine_version: Option<String>,
@@ -459,6 +470,14 @@ pub(crate) struct OcrContent {
     pub(crate) last_attempt_status: String,
     pub(crate) last_attempt_at: u64,
     pub(crate) last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct OcrSelection {
+    pub(crate) result_revision: String,
+    pub(crate) segment_index: usize,
+    pub(crate) observed_at_ms: u64,
 }
 
 #[derive(Debug)]

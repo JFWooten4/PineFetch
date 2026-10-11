@@ -1,5 +1,5 @@
 import { formatHistorySource, formatLocalDateTime, formatUploadDate } from './formatters.js';
-import { closeDialog, initTabs, openDialog, toast } from './vendor/oj/index.js';
+import { initTabs, toast } from './vendor/oj/index.js';
 import { createHistoryOcrView } from './history-ocr-view.js';
 
 export const createHistoryDetailsView = ({
@@ -10,6 +10,9 @@ export const createHistoryDetailsView = ({
     formatDuration,
     detectPlatform,
     showSavedVideosByCreator,
+    jobs,
+    navigateToDetails,
+    navigateToHistory,
 }) => {
     const state = {
         contextEntryId: null,
@@ -20,8 +23,10 @@ export const createHistoryDetailsView = ({
         detailsRequestId: 0,
         transcript: undefined,
         captions: new Map(),
+        entryId: null,
+        returnFocus: null,
     };
-    const ocrView = createHistoryOcrView({ els, api, appendLog });
+    const ocrView = createHistoryOcrView({ els, api, appendLog, jobs });
 
     const formatDateTime = timestamp => {
         const date = new Date(Number(timestamp));
@@ -150,7 +155,7 @@ export const createHistoryDetailsView = ({
         els.historyTranscriptText.hidden = true;
         els.historyTranscriptCopyBtn.disabled = true;
         if (!content) {
-            els.historyTranscriptStatus.textContent = 'Transcript is no longer available.';
+            els.historyTranscriptStatus.textContent = 'No transcript is saved for this video.';
             return;
         }
 
@@ -172,6 +177,10 @@ export const createHistoryDetailsView = ({
     };
 
     const loadTranscript = async () => {
+        if (!state.details?.transcript) {
+            renderTranscript(null);
+            return;
+        }
         if (state.transcript !== undefined) {
             renderTranscript(state.transcript);
             return;
@@ -186,7 +195,7 @@ export const createHistoryDetailsView = ({
             const content = await api.getHistoryTranscript({ id: entryId });
             if (
                 requestId !== state.detailsRequestId ||
-                !els.historyDetailsDialog.open ||
+                state.entryId !== entryId ||
                 state.details?.entry?.id !== entryId
             )
                 return;
@@ -194,7 +203,7 @@ export const createHistoryDetailsView = ({
             renderTranscript(state.transcript);
         } catch (err) {
             appendLog(`[history details] ${err}`, true);
-            if (requestId === state.detailsRequestId && els.historyDetailsDialog.open) {
+            if (requestId === state.detailsRequestId && state.entryId === entryId) {
                 els.historyTranscriptStatus.textContent = 'Transcript could not be loaded.';
             }
         }
@@ -262,7 +271,7 @@ export const createHistoryDetailsView = ({
             const content = await api.getHistoryCaption({ id: entryId, mediaPath });
             if (
                 requestId !== state.detailsRequestId ||
-                !els.historyDetailsDialog.open ||
+                state.entryId !== entryId ||
                 state.details?.entry?.id !== entryId ||
                 els.historyCaptionTrackSelect.value !== mediaPath
             )
@@ -273,7 +282,7 @@ export const createHistoryDetailsView = ({
             appendLog(`[history details] ${err}`, true);
             if (
                 requestId === state.detailsRequestId &&
-                els.historyDetailsDialog.open &&
+                state.entryId === entryId &&
                 els.historyCaptionTrackSelect.value === mediaPath
             ) {
                 els.historyCaptionStatus.textContent = 'Captions could not be loaded.';
@@ -282,39 +291,66 @@ export const createHistoryDetailsView = ({
     };
 
     const openDetails = async (entryId, returnFocus, { ocr = false } = {}) => {
+        state.entryId = entryId;
+        state.returnFocus = returnFocus;
         state.details = null;
         state.transcript = undefined;
         state.captions.clear();
         const requestId = ++state.detailsRequestId;
-        ocrView.reset(entryId);
-        els.historyDetailsSubtitle.textContent = '';
-        els.historyDetailsStatus.textContent = 'Loading details...';
         els.historyDetailsContent.hidden = true;
         els.historyOverviewTab.click();
-        openDialog(els.historyDetailsDialog, { trigger: returnFocus });
+        ocrView.reset(entryId);
+        navigateToDetails(entryId);
+        els.historyDetailsTitle.textContent = 'Video Details';
+        els.historyDetailsSubtitle.textContent = '';
+        els.historyDetailsDate.textContent = '';
+        els.historyDetailsDownloadStatus.textContent = '';
+        els.historyDetailsThumbnail.hidden = true;
+        els.historyDetailsThumbnail.removeAttribute('src');
+        els.historyDetailsHeader.classList.add('pinefetch-no-media');
+        els.historyDetailsStatus.textContent = 'Loading details...';
+        els.historyDetailsBackBtn.focus({ preventScroll: true });
 
         try {
             const details = await api.getHistoryDetails({ id: entryId });
-            if (requestId !== state.detailsRequestId || !els.historyDetailsDialog.open) return;
+            if (requestId !== state.detailsRequestId || state.entryId !== entryId) return;
             if (!details) {
                 els.historyDetailsStatus.textContent = 'This history entry is no longer available.';
                 return;
             }
 
             state.details = details;
-            ocrView.setEntry(details.entry);
             const title = details.entry?.title || details.entry?.filename || 'History entry';
-            els.historyDetailsSubtitle.textContent = title;
+            els.historyDetailsTitle.textContent = title;
+            els.historyDetailsSubtitle.textContent = [
+                formatHistorySource(details.entry?.source || detectPlatform(details.entry?.url)),
+                details.entry?.uploader,
+            ]
+                .filter(Boolean)
+                .join(' · ');
+            els.historyDetailsDate.textContent =
+                formatDateTime(details.entry?.completed_at || details.entry?.created_at) || '';
+            els.historyDetailsDownloadStatus.textContent = details.output_file_available
+                ? 'Downloaded · File available'
+                : 'Saved · File missing';
+            if (details.entry?.thumbnail) {
+                els.historyDetailsThumbnail.src = details.entry.thumbnail;
+                els.historyDetailsThumbnail.hidden = false;
+                els.historyDetailsHeader.classList.remove('pinefetch-no-media');
+            }
+            els.historyDetailsOpenFileBtn.disabled = !details.output_file_available;
+            els.historyDetailsOpenBrowserBtn.disabled = !details.entry?.url;
             els.historyDetailsStatus.textContent = '';
-            els.historyTranscriptTab.hidden = !details.transcript;
-            els.historyTranscriptTab.disabled = !details.transcript;
-            els.historyCaptionsTab.hidden = !details.captions?.length;
-            els.historyCaptionsTab.disabled = !details.captions?.length;
+            els.historyCaptionsPanel.hidden = !details.captions?.length;
+            els.historyTranscriptStatus.textContent = '';
+            els.historyTranscriptText.textContent = '';
+            els.historyTranscriptText.hidden = true;
+            els.historyTranscriptCopyBtn.disabled = true;
             els.historyDetailsTabs.hidden = false;
             renderOverview(details);
             renderCaptionOptions(details.captions || []);
             els.historyDetailsContent.hidden = false;
-            if (ocr) els.historyOcrTab.click();
+            if (ocr || jobs.get(entryId)?.status === 'running') els.historyOcrTab.click();
         } catch (err) {
             appendLog(`[history details] ${err}`, true);
             if (requestId === state.detailsRequestId) {
@@ -328,7 +364,7 @@ export const createHistoryDetailsView = ({
         try {
             await navigator.clipboard.writeText(content.text);
             statusElement.textContent = `${label} copied.`;
-            toast(`${label} copied.`, { type: 'success', root: els.historyDetailsDialog });
+            toast(`${label} copied.`, { type: 'success' });
         } catch (err) {
             appendLog(`[copy] ${err}`, true);
             statusElement.textContent = `${label} could not be copied.`;
@@ -384,18 +420,11 @@ export const createHistoryDetailsView = ({
             hideContextMenu();
             if (creator?.uploader && creator.source) showSavedVideosByCreator(creator);
         });
-        els.historyCheckOcrBtn.addEventListener('click', async () => {
+        els.historyOpenOcrBtn.addEventListener('click', () => {
             const entryId = state.contextEntryId;
             const returnFocus = state.contextReturnFocus;
             hideContextMenu();
-            if (!entryId || !api.available) return;
-            try {
-                await api.startHistoryOcr({ id: entryId });
-                await openDetails(entryId, returnFocus, { ocr: true });
-            } catch (error) {
-                appendLog(`[OCR] ${error}`, true);
-                toast(`${error}`, { type: 'error' });
-            }
+            if (entryId) void openDetails(entryId, returnFocus, { ocr: true });
         });
         document.addEventListener('pointerdown', event => {
             const target = event.target instanceof Element ? event.target : null;
@@ -437,18 +466,38 @@ export const createHistoryDetailsView = ({
         window.addEventListener('blur', () => hideContextMenu());
         els.historyList.addEventListener('scroll', () => hideContextMenu(), { passive: true });
 
-        els.historyDetailsDialog.addEventListener('oj:close', event => {
-            if (event.target !== els.historyDetailsDialog) return;
-            state.detailsRequestId += 1;
+        els.historyDetailsBackBtn.addEventListener('click', () => navigateToHistory(state.returnFocus));
+        els.historyDetailsThumbnail.addEventListener('error', () => {
+            els.historyDetailsThumbnail.hidden = true;
+            els.historyDetailsHeader.classList.add('pinefetch-no-media');
         });
-        els.historyDetailsDialog.addEventListener('click', event => {
-            if (event.target === els.historyDetailsDialog) closeDialog(els.historyDetailsDialog, 'close');
+        els.historyDetailsOpenFileBtn.addEventListener('click', async () => {
+            const path = state.details?.entry?.output_path;
+            if (!path || !api.available) return;
+            try {
+                if (!(await api.openFilePath({ path })))
+                    toast('The saved file is no longer available.', { type: 'error' });
+            } catch (error) {
+                appendLog(`[open] ${error}`, true);
+            }
+        });
+        els.historyDetailsOpenBrowserBtn.addEventListener('click', async () => {
+            const url = state.details?.entry?.url;
+            if (!url || !api.available) return;
+            try {
+                await api.openExternalUrl({ url });
+            } catch (error) {
+                appendLog(`[open] ${error}`, true);
+            }
         });
         els.historyDetailsContent.addEventListener('oj:change', event => {
             if (event.target !== els.historyDetailsContent) return;
-            if (event.detail.tab === els.historyTranscriptTab) void loadTranscript();
-            if (event.detail.tab === els.historyCaptionsTab) void loadSelectedCaption();
+            if (event.detail.tab === els.historyTranscriptTab) {
+                void loadTranscript();
+                void loadSelectedCaption();
+            }
             if (event.detail.tab === els.historyOcrTab) void ocrView.load();
+            else ocrView.deactivate();
         });
         els.historyCaptionTrackSelect.addEventListener('change', () => void loadSelectedCaption());
         els.historyTranscriptCopyBtn.addEventListener(
@@ -461,5 +510,18 @@ export const createHistoryDetailsView = ({
         });
     };
 
-    return Object.freeze({ bindEvents, hideContextMenu });
+    return Object.freeze({
+        bindEvents,
+        hideContextMenu,
+        open: openDetails,
+        activate: () => {
+            if (!els.historyDetailsView.hidden) void ocrView.load();
+            else ocrView.deactivate();
+        },
+        leave: () => {
+            state.entryId = null;
+            state.detailsRequestId += 1;
+            ocrView.deactivate();
+        },
+    });
 };

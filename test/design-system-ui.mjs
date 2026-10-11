@@ -39,6 +39,10 @@ const installUiResponses = () => {
         ocrAttempt: 0,
         holdOcr: false,
         releaseOcr: null,
+        holdFrame: false,
+        releaseFrame: null,
+        failNextFrame: false,
+        failNextOcrDelete: false,
         failNextModelSave: false,
         releasePresets,
         setHistorySources: sources => {
@@ -107,6 +111,9 @@ const installUiResponses = () => {
             };
         }
         if (command === 'get_history_details') {
+            const customEntry = historyEntries?.find(entry => entry.id === args.id);
+            if (customEntry)
+                return { entry: customEntry, output_file_available: false, transcript: null, captions: [] };
             const details = await invoke(command, args);
             if (args.id === 'history-2')
                 return { ...details, entry: { ...details.entry, thumbnail: null }, transcript: null, captions: [] };
@@ -114,6 +121,7 @@ const installUiResponses = () => {
         }
         if (command === 'get_history_ocr') {
             const content = structuredClone(ui.ocrRecords[args.id] || null);
+            if (content?.segments) content.result_revision = JSON.stringify(content.segments);
             if (ui.holdOcr) {
                 ui.holdOcr = false;
                 return new Promise(resolve => {
@@ -123,7 +131,36 @@ const installUiResponses = () => {
             return content;
         }
         if (command === 'get_history_ocr_progress') return structuredClone(ui.ocrProgress[args.id] || null);
+        if (command === 'get_history_ocr_frame') {
+            if (ui.failNextFrame) {
+                ui.failNextFrame = false;
+                throw new Error('Fixture saved file is missing.');
+            }
+            const image = globalThis.document.querySelector('#historyDetailsThumbnail').src;
+            if (ui.holdFrame) {
+                ui.holdFrame = false;
+                return new Promise(resolve => {
+                    ui.releaseFrame = () => resolve(image);
+                });
+            }
+            return image;
+        }
+        if (command === 'delete_history_ocr_observation') {
+            if (ui.failNextOcrDelete) {
+                ui.failNextOcrDelete = false;
+                throw new Error('Fixture SQLite write failed.');
+            }
+            const content = ui.ocrRecords[args.id];
+            if (content.last_attempt_status === 'running') throw new Error('Analysis is running');
+            if (JSON.stringify(content.segments) !== args.selection.result_revision) throw new Error('Results changed');
+            const segment = content.segments[args.selection.segment_index];
+            segment.observed_at_ms = segment.observed_at_ms.filter(time => time !== args.selection.observed_at_ms);
+            if (!segment.observed_at_ms.length) content.segments.splice(args.selection.segment_index, 1);
+            content.text = '';
+            return { ...structuredClone(content), result_revision: JSON.stringify(content.segments) };
+        }
         if (command === 'start_history_ocr') {
+            if (ui.ocrProgress[args.id]) return structuredClone(ui.ocrProgress[args.id]);
             if (Object.keys(ui.ocrProgress).length) throw new Error('An OCR analysis is already running.');
             const progress = {
                 history_id: args.id,
@@ -460,6 +497,10 @@ try {
                 assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
             }
             const historyCommandCount = () => page.evaluate(() => globalThis.__pinefetchUi.commands.length);
+            const historyReadCount = () =>
+                page.evaluate(
+                    () => globalThis.__pinefetchUi.commands.filter(call => call.command === 'get_history').length
+                );
             const waitForHistoryRequest = async (after, searchField, source = '', query = '') => {
                 await page.waitForFunction(
                     expected =>
@@ -600,6 +641,7 @@ try {
                 );
             assert.equal((await latestHistoryArgs()).offset, 0);
             assert.equal((await latestHistoryArgs()).exactUser, true);
+
             assert.equal(await resultCount.textContent(), '25 found');
             assert(await resultCount.isVisible());
             await page.setViewportSize({ width: 1000, height: 960 });
@@ -615,6 +657,40 @@ try {
             assert.equal((await latestHistoryArgs()).offset, 20);
             assert.equal(await resultCount.textContent(), '25 found');
             assert.equal((await latestHistoryArgs()).exactUser, true);
+
+            // Detail navigation preserves the exact query, all loaded rows and
+            // the actual list nodes/scroll position without a History reload.
+            await page.locator('#historyList').evaluate(list => {
+                list.scrollTop = list.scrollHeight;
+            });
+            const retainedScroll = await page.locator('#historyList').evaluate(list => list.scrollTop);
+            assert(retainedScroll > 0);
+            const retainedRequests = await historyReadCount();
+            await page.evaluate(() => {
+                globalThis.__retainedHistoryRow = globalThis.document.querySelector('.pinefetch-history-item');
+            });
+            await page.locator('[data-history-id="creator-24"] .pinefetch-history-open-btn').click();
+            await page.locator('#historyDetailsContent').waitFor();
+            assert.equal(await page.locator('#historyDetailsTitle').textContent(), 'Blender tutorial 24');
+            assert.equal(await page.locator('#historyDetailsView').evaluate(element => element.tagName), 'SECTION');
+            assert.equal(await page.locator('dialog[open]').count(), 0);
+            assert(await page.locator('#viewDownloadBtn').isVisible());
+            const fullContainer = await page.locator('#historyDetailsView').boundingBox();
+            assert(fullContainer.width >= 900);
+            await page.locator('#historyDetailsBackBtn').click();
+            await page.locator('#historyView').waitFor();
+            assert.equal(await searchInput.inputValue(), 'Blender');
+            assert.equal(await page.locator('#historySourceValue').textContent(), 'YouTube');
+            assert.equal(await page.locator('#historySearchFieldValue').textContent(), 'User');
+            assert.equal(await page.locator('.pinefetch-history-item').count(), 25);
+            assert.equal(await historyReadCount(), retainedRequests);
+            assert.equal(await page.locator('#historyList').evaluate(list => list.scrollTop), retainedScroll);
+            assert(
+                await page.evaluate(
+                    () =>
+                        globalThis.__retainedHistoryRow === globalThis.document.querySelector('.pinefetch-history-item')
+                )
+            );
 
             // A refresh and a view switch keep the shortcut; manual edits restore partial matching.
             beforeHistoryRequest = await historyCommandCount();
@@ -664,7 +740,7 @@ try {
             );
             await page.keyboard.press('End');
             await page.waitForFunction(
-                () => globalThis.document.getElementById('historyCheckOcrBtn') === globalThis.document.activeElement
+                () => globalThis.document.getElementById('historyOpenOcrBtn') === globalThis.document.activeElement
             );
             await page.keyboard.press('Escape');
             await page.locator('#historyContextMenu').waitFor({ state: 'hidden' });
@@ -687,17 +763,25 @@ try {
             await page.keyboard.press('Shift+F10');
             await page.locator('#historyShowMoreDataBtn').click();
             await page.locator('#historyDetailsContent').waitFor();
+            await page.locator('#historyDetailsOpenFileBtn').click();
+            await page.locator('#historyDetailsOpenBrowserBtn').click();
+            assert(
+                await page.evaluate(() =>
+                    globalThis.__pinefetchUi.commands.some(call => call.command === 'open_file_path')
+                )
+            );
             await page.locator('#historyOverviewTab').focus();
             await page.keyboard.press('ArrowRight');
             await page.locator('#historyTranscriptText').waitFor();
             assert.equal(await page.locator('#historyTranscriptTab').getAttribute('aria-selected'), 'true');
             assert.equal(await page.locator('#historyTranscriptText img').count(), 0);
             await page.locator('#historyTranscriptCopyBtn').click();
-            await page.locator('#historyDetailsDialog .oj-toast').waitFor();
+            await page.locator('.oj-toast').first().waitFor();
             assert.match(await page.evaluate(() => globalThis.__pinefetchUi.copied), /^Transcript <img/);
+            await page.locator('#historyCaptionText').waitFor();
             await page.locator('#historyTranscriptTab').focus();
             await page.keyboard.press('ArrowRight');
-            await page.locator('#historyCaptionText').waitFor();
+            assert.equal(await page.locator('#historyOcrTab').getAttribute('aria-selected'), 'true');
             await page.keyboard.press('Home');
             await page.keyboard.press('ArrowRight');
             assert.equal(
@@ -708,8 +792,8 @@ try {
                 ),
                 1
             );
-            await page.keyboard.press('Escape');
-            await page.locator('#historyDetailsDialog').waitFor({ state: 'hidden' });
+            await page.locator('#historyDetailsBackBtn').click();
+            await page.locator('#historyDetailsView').waitFor({ state: 'hidden' });
             await page.waitForFunction(
                 () =>
                     globalThis.document.querySelector('.pinefetch-history-open-btn') ===
@@ -720,14 +804,19 @@ try {
             await page.locator('#historyShowMoreDataBtn').click();
             await page.locator('#historyDetailsContent').waitFor();
             assert.equal(await page.locator('#historyOverviewTab').getAttribute('aria-selected'), 'true');
-            assert(await page.locator('#historyTranscriptTab').isDisabled());
-            assert.equal(await page.locator('#historyTranscriptTab').isVisible(), false);
-            await page.locator('#historyDetailsCloseBtn').click();
-            await page.locator('#historyDetailsDialog').waitFor({ state: 'hidden' });
+            assert.equal(await page.locator('#historyTranscriptTab').isDisabled(), false);
+            assert(await page.locator('#historyTranscriptTab').isVisible());
+            await page.locator('#historyTranscriptTab').click();
+            assert.equal(
+                await page.locator('#historyTranscriptStatus').textContent(),
+                'No transcript is saved for this video.'
+            );
+            await page.locator('#historyDetailsBackBtn').click();
+            await page.locator('#historyDetailsView').waitFor({ state: 'hidden' });
 
             // OCR is lazy, safe text, explicitly cancellable, and entry/request scoped.
             const openOcr = async (id, start = false) => {
-                // Let the previous dialog's scheduled focus restoration finish.
+                // Allow focus and layout to settle before opening the keyboard menu.
                 await page.evaluate(
                     () =>
                         new Promise(resolve =>
@@ -748,16 +837,19 @@ try {
                         .getAttribute('aria-expanded'),
                     'true'
                 );
-                await page.locator(start ? '#historyCheckOcrBtn' : '#historyShowMoreDataBtn').click();
+                await page.locator('#historyOpenOcrBtn').click();
                 await page.locator('#historyDetailsContent').waitFor();
-                if (!start) await page.locator('#historyOcrTab').click();
+                if (start) {
+                    await page.locator('#historyOcrStartBtn').waitFor();
+                    await page.locator('#historyOcrStartBtn').click();
+                }
                 await page.waitForFunction(
                     () => globalThis.document.getElementById('historyOcrTab').getAttribute('aria-selected') === 'true'
                 );
             };
             const closeDetails = async () => {
-                await page.locator('#historyDetailsCloseBtn').click();
-                await page.locator('#historyDetailsDialog').waitFor({ state: 'hidden' });
+                await page.locator('#historyDetailsBackBtn').click();
+                await page.locator('#historyDetailsView').waitFor({ state: 'hidden' });
             };
             const expectOcrStatus = status =>
                 page.waitForFunction(
@@ -775,7 +867,7 @@ try {
                         'historyOcrFramesTotal',
                         'historyOcrProgressText',
                         'historyOcrCancelBtn',
-                        'historyOcrThumbnail',
+                        'historyDetailsThumbnail',
                     ].map(id => {
                         const { x, y, width, height } = globalThis.document.getElementById(id).getBoundingClientRect();
                         return { id, x, y, width, height };
@@ -798,8 +890,8 @@ try {
             assert.equal(await page.locator('#historyOcrProgress').getAttribute('value'), null);
             assert(await page.locator('#historyOcrPreparing').isVisible());
             assert.equal(await page.locator('#historyOcrProgressText').isVisible(), false);
-            assert(await page.locator('#historyOcrThumbnail').isVisible());
-            assert(await page.locator('#historyOcrThumbnail').getAttribute('src'));
+            assert(await page.locator('#historyDetailsThumbnail').isVisible());
+            assert(await page.locator('#historyDetailsThumbnail').getAttribute('src'));
             await page.evaluate(() => {
                 const progress = globalThis.__pinefetchUi.ocrProgress['history-1'];
                 progress.frames_checked = 3;
@@ -825,7 +917,7 @@ try {
                 globalThis.__pinefetchUi.emit('history:ocr', progress);
             });
             assert.equal(await ocrProgressText(), 'Video time 00:12:20 / 00:21:45 · Frames 741 / 1306');
-            assert(await page.locator('#historyOcrThumbnail').isVisible());
+            assert(await page.locator('#historyDetailsThumbnail').isVisible());
             assert(await page.locator('#historyOcrPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
             await page.evaluate(() => globalThis.document.fonts.ready);
             const counterLayout = await ocrCounterLayout();
@@ -869,9 +961,51 @@ try {
                 ),
                 0
             );
+            const backgroundRequests = await historyReadCount();
+            assert.match(
+                await page.locator('[data-history-id="history-1"] .pinefetch-history-ocr-indicator').textContent(),
+                /processing/
+            );
+            await page.locator('#viewDownloadBtn').click();
+            await page.evaluate(() => {
+                const progress = globalThis.__pinefetchUi.ocrProgress['history-1'];
+                Object.assign(progress, { frames_checked: 800, observed_at_ms: 800000 });
+                globalThis.__pinefetchUi.emit('history:ocr', progress);
+            });
+            await page.locator('#viewHistoryBtn').click();
+            await page.locator('#historyView').waitFor();
+            assert.equal(await historyReadCount(), backgroundRequests);
+            await page.locator('[data-history-id="history-2"] .pinefetch-history-open-btn').click();
+            await page.locator('#historyDetailsContent').waitFor();
+            assert.equal(await page.locator('#historyOverviewTab').getAttribute('aria-selected'), 'true');
+            await page.locator('#historyOcrTab').click();
+            await expectOcrStatus('Not checked yet');
+            await page.locator('#historyOcrStartBtn').click();
+            assert.match(await page.locator('#historyOcrNotice').textContent(), /Another OCR analysis is active/);
+            assert.equal(
+                await page.evaluate(
+                    () => globalThis.__pinefetchUi.commands.filter(call => call.command === 'start_history_ocr').length
+                ),
+                1
+            );
+            assert.equal(
+                await page.evaluate(() => globalThis.__pinefetchUi.ocrProgress['history-1'].frames_checked),
+                800
+            );
+            await closeDetails();
             await openOcr('history-1');
             await expectOcrStatus('Checking for OCR…');
-            assert.equal(await ocrProgressText(), 'Video time 00:12:20 / 00:21:45 · Frames 741 / 1306');
+            assert.equal(await ocrProgressText(), 'Video time 00:13:20 / 00:21:45 · Frames 800 / 1306');
+            await page.locator('#historyOverviewTab').click();
+            await page.locator('#historyTranscriptTab').click();
+            await page.locator('#historyOcrTab').click();
+            await expectOcrStatus('Checking for OCR…');
+            assert.equal(
+                await page.evaluate(
+                    () => globalThis.__pinefetchUi.commands.filter(call => call.command === 'start_history_ocr').length
+                ),
+                1
+            );
             await page.locator('#historyOcrCancelBtn').click();
             await expectOcrStatus('OCR cancelled');
             await closeDetails();
@@ -890,6 +1024,9 @@ try {
             await expectOcrStatus('Finishing OCR…');
             assert.equal(await ocrProgressText(), 'Video time 00:00:03 / 00:00:03 · Frames 4 / 4');
             assert(Number(await page.locator('#historyOcrProgress').getAttribute('value')) < 1);
+            await closeDetails();
+            await openOcr('history-2');
+            await expectOcrStatus('Not checked yet');
             await page.evaluate(() => {
                 const ui = globalThis.__pinefetchUi;
                 const progress = ui.ocrProgress['history-1'];
@@ -898,23 +1035,115 @@ try {
                     last_attempt_status: 'completed',
                     result_created_at: 1700000000000,
                     text: 'plain text',
-                    segments: [{ text: '<img src=x onerror=alert(1)> 12!', observed_at_ms: [3020, 4030] }],
+                    segments: [
+                        { text: '<img src=x onerror=alert(1)> 12!', observed_at_ms: [3020, 9030] },
+                        { text: 'Second text', observed_at_ms: [4030] },
+                    ],
                 };
                 delete ui.ocrProgress['history-1'];
                 ui.emit('history:ocr', { ...progress, status: 'completed' });
             });
+            assert.equal(await page.locator('#historyOcrStatus').textContent(), 'Not checked yet');
+            await closeDetails();
+            assert.match(
+                await page.locator('[data-history-id="history-1"] .pinefetch-history-ocr-indicator').textContent(),
+                /completed/
+            );
+            await openOcr('history-1');
             await expectOcrStatus('OCR complete');
-            assert.equal(await page.locator('#historyOcrThumbnail').isVisible(), false);
+            assert(await page.locator('#historyDetailsThumbnail').isVisible());
             await page.locator('#historyOcrText').waitFor();
             assert.equal(await page.locator('#historyOcrText img').count(), 0);
-            assert.match(await page.locator('#historyOcrText').textContent(), /00:00:03.020, 00:00:04.030/);
+            assert.equal(await page.locator('#historyOcrText li').count(), 3);
+            assert.deepEqual(await page.locator('#historyOcrText .pinefetch-ocr-select').allTextContents(), [
+                '00:00:03',
+                '00:00:04',
+                '00:00:09',
+            ]);
+            await page.locator('#historyOcrSearchInput').fill('second');
+            assert.equal(await page.locator('#historyOcrText li').count(), 1);
+            assert.equal(await page.locator('#historyOcrResultCount').textContent(), '1 found');
+            await page.locator('#historyOcrSearchInput').fill('');
+            await page.setViewportSize({ width: 1000, height: 960 });
+            assert(await page.locator('#historyOcrPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
+            await page.screenshot({ path: `/tmp/pinefetch-ocr-results-${engine.name()}.png` });
+            await page.setViewportSize({ width: 1400, height: 960 });
+            await page.locator('#historyOcrSearchInput').fill('No OCR matches');
+            assert.equal(await page.locator('#historyOcrText li').count(), 0);
+            assert.match(await page.locator('#historyOcrEmpty').textContent(), /No detected text matches/);
             await page.locator('#historyOcrCopyBtn').click();
             assert.match(
                 await page.evaluate(() => globalThis.__pinefetchUi.copied),
-                /^\[00:00:03.020, 00:00:04.030\] <img/
+                /^\[00:00:03.020, 00:00:09.030\] <img/
             );
+            await page.locator('#historyOcrSearchInput').fill('');
+            assert(await page.locator('#historyOcrPreview').isVisible());
+            assert(await page.locator('#historyOcrFrame').isHidden());
+            await page.locator('.pinefetch-ocr-select').first().focus();
+            await page.keyboard.press('Enter');
+            await page.locator('#historyOcrFrame').waitFor();
+            assert(
+                await page
+                    .locator('.pinefetch-ocr-select')
+                    .first()
+                    .evaluate(el => el === globalThis.document.activeElement)
+            );
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:03');
+            assert.match(await page.locator('#historyOcrSelectedText').textContent(), /^<img/);
+            assert.equal(await page.locator('#historyOcrSelectedText img').count(), 0);
+            const frameCall = await page.evaluate(() =>
+                globalThis.__pinefetchUi.commands.findLast(call => call.command === 'get_history_ocr_frame')
+            );
+            assert.equal(frameCall.args.id, 'history-1');
+            assert.equal(frameCall.args.selection.segment_index, 0);
+            assert.equal(frameCall.args.selection.observed_at_ms, 3020);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdFrame = true;
+            });
+            await page.locator('.pinefetch-ocr-select').nth(2).click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseFrame));
+            await page.locator('.pinefetch-ocr-select').nth(1).click();
+            await page.locator('#historyOcrFrame').waitFor();
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseFrame());
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:04');
+            assert.equal(await page.locator('#historyOcrSelectedText').textContent(), 'Second text');
+            await page.setViewportSize({ width: 1000, height: 960 });
+            assert(await page.locator('#historyOcrPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
+            await page.screenshot({ path: `/tmp/pinefetch-ocr-frame-${engine.name()}.png` });
+            await page.setViewportSize({ width: 1400, height: 960 });
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failNextOcrDelete = true;
+            });
+            await page.locator('.pinefetch-ocr-delete').nth(1).click();
+            await page.locator('#historyOcrActionNotice').waitFor();
+            assert.equal(await page.locator('#historyOcrText li').count(), 3);
+            assert.equal(await page.locator('#historyOcrSelectedText').textContent(), 'Second text');
+            await page.locator('.pinefetch-ocr-delete').nth(1).click();
+            await page.waitForFunction(() => globalThis.document.querySelectorAll('#historyOcrText li').length === 2);
+            assert.equal(await page.locator('#historyOcrResultCount').textContent(), '2 detected entries');
+            await page.locator('#historyOcrCopyBtn').click();
+            assert.doesNotMatch(await page.evaluate(() => globalThis.__pinefetchUi.copied), /Second text/);
+            await page.locator('#historyOcrSearchInput').fill('second');
+            assert.equal(await page.locator('#historyOcrResultCount').textContent(), '0 found');
+            await page.locator('#historyOcrSearchInput').fill('');
+            await page.locator('.pinefetch-ocr-delete').first().click();
+            await page.waitForFunction(() => globalThis.document.querySelectorAll('#historyOcrText li').length === 1);
+            assert.equal(await page.locator('.pinefetch-ocr-select').textContent(), '00:00:09');
+            await closeDetails();
+            await openOcr('history-1');
+            await expectOcrStatus('OCR complete');
+            assert.equal(await page.locator('#historyOcrText li').count(), 1);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failNextFrame = true;
+            });
+            await page.locator('.pinefetch-ocr-select').click();
+            await page.waitForFunction(() =>
+                globalThis.document.querySelector('#historyOcrFrameStatus').textContent.includes('unavailable')
+            );
+            assert(await page.locator('#historyOcrFrame').isHidden());
             await closeDetails();
             await openOcr('history-1', true);
+            assert(await page.locator('.pinefetch-ocr-delete').isDisabled());
             await page.evaluate(() => {
                 const ui = globalThis.__pinefetchUi;
                 const progress = ui.ocrProgress['history-1'];
@@ -928,6 +1157,19 @@ try {
             assert.match(await page.locator('#historyOcrMeta').textContent(), /Previous result remains available/);
             assert.match(await page.locator('#historyOcrNotice').textContent(), /saved video changed/);
             assert(await page.locator('#historyOcrCopyBtn').isEnabled());
+            assert.equal(await page.locator('#historyOcrStartBtn').textContent(), 'Retry Analysis');
+            await page.locator('#historyOcrStartBtn').click();
+            await expectOcrStatus('Checking for OCR…');
+            assert(await page.locator('#historyOcrCopyBtn').isEnabled());
+            await page.locator('#historyOcrCancelBtn').click();
+            await expectOcrStatus('OCR cancelled');
+            await page.locator('.pinefetch-ocr-delete').click();
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#historyOcrResultCount').textContent === '0 detected entries'
+            );
+            assert(await page.locator('#historyOcrFrame').isHidden());
+            assert(await page.locator('#historyOcrCopyBtn').isDisabled());
+            assert.match(await page.locator('#historyOcrEmpty').textContent(), /No text was detected/);
             await closeDetails();
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.holdOcr = true;
@@ -946,7 +1188,7 @@ try {
             );
             assert.equal(await page.locator('#historyOcrText').textContent(), '');
             assert.equal(await page.locator('#historyOcrStatus').textContent(), 'Not checked yet');
-            assert.equal(await page.locator('#historyOcrThumbnail').getAttribute('src'), null);
+            assert.equal(await page.locator('#historyDetailsThumbnail').getAttribute('src'), null);
             await page.evaluate(() => {
                 const ui = globalThis.__pinefetchUi;
                 ui.ocrRecords['history-2'] = {
@@ -959,15 +1201,32 @@ try {
             });
             await page.locator('#historyOverviewTab').click();
             await page.locator('#historyOcrTab').click();
-            await expectOcrStatus('No text detected');
+            await expectOcrStatus('OCR complete');
+            assert.match(await page.locator('#historyOcrEmpty').textContent(), /No text was detected/);
             assert(await page.locator('#historyOcrCopyBtn').isDisabled());
+            await page.evaluate(() => {
+                const content = globalThis.__pinefetchUi.ocrRecords['history-2'];
+                content.segments = Array.from({ length: 151 }, (_, index) => ({
+                    text: `Detected entry ${index}`,
+                    observed_at_ms: [index * 1000],
+                }));
+                content.text = 'Saved long OCR result';
+            });
+            await page.locator('#historyOverviewTab').click();
+            await page.locator('#historyOcrTab').click();
+            await page.waitForFunction(() => globalThis.document.querySelectorAll('#historyOcrText li').length === 100);
+            await page.locator('#historyOcrLoadMoreBtn').click();
+            assert.equal(await page.locator('#historyOcrText li').count(), 151);
+            await page.locator('#historyOcrSearchInput').fill('entry 150');
+            assert.equal(await page.locator('#historyOcrText li').count(), 1);
+            assert.equal(await page.locator('#historyOcrLoadMoreBtn').isVisible(), false);
             await closeDetails();
 
             await openOcr('history-2', true);
             await expectOcrStatus('Checking for OCR…');
-            assert.equal(await page.locator('#historyOcrThumbnail').isVisible(), false);
+            assert.equal(await page.locator('#historyDetailsThumbnail').isVisible(), false);
             assert(
-                await page.locator('#historyOcrAnalysis').evaluate(el => el.classList.contains('pinefetch-no-media'))
+                await page.locator('#historyDetailsHeader').evaluate(el => el.classList.contains('pinefetch-no-media'))
             );
             await page.evaluate(() => {
                 const progress = globalThis.__pinefetchUi.ocrProgress['history-2'];
@@ -1203,7 +1462,7 @@ try {
             assert(loadedFonts.some(url => url.includes('fa-solid')));
             assert.deepEqual(errors, []);
             console.log(
-                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, history filters/creator/reset, transcription model/save rollback, menus, tabs, dialog focus, confirmations and switches passed.`
+                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, history filters/creator/reset, transcription model/save rollback, menus, tabs, full-container details, OCR background navigation/search, preserved History state, confirmations and switches passed.`
             );
         } finally {
             await browser.close();

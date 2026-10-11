@@ -237,6 +237,46 @@ pub(crate) fn get_history_ocr_progress(
 }
 
 #[tauri::command]
+pub(crate) async fn get_history_ocr_frame(
+    app: AppHandle,
+    id: String,
+    selection: crate::models::OcrSelection,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let configured = state
+            .config
+            .lock()
+            .map_err(|_| "Config lock poisoned")?
+            .yt_dlp_path
+            .clone();
+        let directory =
+            crate::runtime::resolve_ffmpeg_location(&app, configured.as_deref().unwrap_or(""))
+                .ok_or("FFmpeg and ffprobe are required for frame previews.")?;
+        let directory = std::path::Path::new(&directory);
+        state.ocr_preview.frame(
+            &state.db,
+            &state.processes,
+            &id,
+            &selection,
+            &directory.join(crate::runtime::ffmpeg_tool_name()),
+            &directory.join(crate::runtime::ffprobe_tool_name()),
+        )
+    })
+    .await
+    .map_err(|e| format!("Frame preview failed: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) fn delete_history_ocr_observation(
+    state: State<AppState>,
+    id: String,
+    selection: crate::models::OcrSelection,
+) -> Result<crate::models::OcrContent, String> {
+    crate::ocr_store::delete_observation(&state.db, &id, &selection)
+}
+
+#[tauri::command]
 pub(crate) fn cancel_history_ocr(
     state: State<AppState>,
     id: String,

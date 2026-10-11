@@ -177,8 +177,17 @@ for those guarantees and their temporary-database/fault-injection regressions.
 
 Local OCR uses `ocr` for background orchestration and an independent process
 registry, `ocr_rules` for conservative grouping/media/protocol validation and
-`ocr_store` for guarded SQL. `history-ocr-view.js` owns the lazy detail tab through
-the API client. Additive schema 3 and the compiled Vision resource are documented
+`ocr_store` for guarded SQL. `history-ocr-jobs.js` owns app-wide events and job
+state independently of navigation. `history-details-view.js` uses a full-container
+workspace with Overview, Transcript (including captions) and OCR Text tabs;
+`history-ocr-view.js` loads results lazily through the API client. History's cached
+list and scroll position survive detail navigation. Compact OCR summaries travel
+with each History page using a LEFT JOIN, without result text or per-entry queries.
+`ocr_preview` verifies saved-source identity and extracts requested frames with
+FFmpeg through the app's utility registry, independently of OCR cancellation.
+Result revisions guard preview selection and atomic per-observation deletion;
+edited text and segments stay in the existing OCR row.
+The existing schema 3 and compiled Vision resource are documented
 in [OCR.md](OCR.md); no general job framework is introduced.
 
 ## Frontend boundary
@@ -199,9 +208,9 @@ direct `__TAURI__` property access in other owned frontend modules.
 
 `src/app-state.js` owns the central state factory and pure job/queue status rules,
 including terminal removal and suppression of late events. DOM references and
-render scheduling remain in `src/main.js`. The existing settings, history,
-history-details and browser-import views retain their UI behavior and now receive
-the API client. `url-utils.js` remains independent of the DOM.
+render scheduling remain in `src/main.js`. Settings, History, its detail workspace
+and browser-import views receive the API client. History navigation state is
+separate from OCR job state. `url-utils.js` remains independent of the DOM.
 
 Views still manage presentation state and asynchronous UI requests. Settings save
 coordination and the main download form are intentionally not rewritten into a

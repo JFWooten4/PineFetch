@@ -62,7 +62,7 @@ Your completed downloads are stored in a local history with useful stats like to
 
 ![PineFetch history screen](src/images/mockups/history.webp)
 
-Right-click a History entry and choose **Show More Data** to inspect its metadata, transcript and saved caption tracks. Transcript and caption content is loaded only when you open the corresponding tab.
+Open a History entry to inspect its metadata, transcript and saved caption tracks in a full-width detail view. **Back to History** preserves your filters, loaded entries and scroll position. **Open OCR** in the context menu opens the OCR tab; **Start OCR Analysis** starts local Apple Vision analysis on macOS. Analyses keep running while you use other views, and OCR status appears in History. Saved text can be searched and copied. Select an OCR observation to preview its video frame; **Delete** removes that observation from the saved result. Transcript, caption and OCR content is loaded on demand.
 
 ![PineFetch History Details screen](src/images/mockups/more_data.webp)
 

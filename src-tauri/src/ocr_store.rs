@@ -1,8 +1,8 @@
 //! Short, guarded SQLite operations. Result fields survive every failed attempt.
 use crate::database::{self, Database};
 use crate::files::current_timestamp_millis;
-use crate::models::{OcrContent, OcrResult};
-use rusqlite::{params, OptionalExtension};
+use crate::models::{OcrContent, OcrResult, OcrSelection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 pub(crate) fn saved_path(db: &Database, id: &str) -> Result<String, String> {
     let conn = db.lock().map_err(|_| "SQLite lock poisoned")?;
@@ -120,12 +120,26 @@ pub(crate) fn interrupt_orphans(db: &Database) -> Result<(), String> {
 
 pub(crate) fn get(db: &Database, id: &str) -> Result<Option<OcrContent>, String> {
     let conn = db.lock().map_err(|_| "SQLite lock poisoned")?;
+    read(&conn, id)
+}
+
+fn read(conn: &Connection, id: &str) -> Result<Option<OcrContent>, String> {
     let row = conn.query_row("SELECT history_entry_id,text,segments_json,source_sha256,engine,engine_version,settings_json,
         result_created_at,last_attempt_id,last_attempt_status,last_attempt_at,last_error FROM history_ocr WHERE history_entry_id=?1", [id], |r| {
         let segments: Option<String> = r.get(2)?;
-        Ok((OcrContent { history_entry_id:r.get(0)?,text:r.get(1)?,segments:None,source_sha256:r.get(3)?,engine:r.get(4)?,engine_version:r.get(5)?,settings_json:r.get(6)?,result_created_at:r.get(7)?,last_attempt_id:r.get(8)?,last_attempt_status:r.get(9)?,last_attempt_at:r.get(10)?,last_error:r.get(11)? }, segments))
+        Ok((OcrContent { history_entry_id:r.get(0)?,text:r.get(1)?,segments:None,result_revision:None,source_sha256:r.get(3)?,engine:r.get(4)?,engine_version:r.get(5)?,settings_json:r.get(6)?,result_created_at:r.get(7)?,last_attempt_id:r.get(8)?,last_attempt_status:r.get(9)?,last_attempt_at:r.get(10)?,last_error:r.get(11)? }, segments))
     }).optional().map_err(|e| format!("OCR could not be loaded: {e}"))?;
     row.map(|(mut content, json)| {
+        content.result_revision = json.as_ref().map(|s| {
+            crate::hashing::sha256_hex(
+                format!(
+                    "{}:{}:{s}",
+                    content.source_sha256.as_deref().unwrap_or(""),
+                    content.result_created_at.unwrap_or(0)
+                )
+                .as_bytes(),
+            )
+        });
         content.segments = json
             .map(|s| serde_json::from_str(&s))
             .transpose()
@@ -133,4 +147,57 @@ pub(crate) fn get(db: &Database, id: &str) -> Result<Option<OcrContent>, String>
         Ok(content)
     })
     .transpose()
+}
+
+pub(crate) fn validate_selection(
+    content: &OcrContent,
+    selection: &OcrSelection,
+) -> Result<(), String> {
+    if content.result_revision.as_deref() != Some(&selection.result_revision) {
+        return Err("OCR results changed. Reload the detected text and try again.".into());
+    }
+    if !content
+        .segments
+        .as_ref()
+        .and_then(|segments| segments.get(selection.segment_index))
+        .is_some_and(|segment| segment.observed_at_ms.contains(&selection.observed_at_ms))
+    {
+        return Err("This OCR observation is no longer available.".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn delete_observation(
+    db: &Database,
+    id: &str,
+    selection: &OcrSelection,
+) -> Result<OcrContent, String> {
+    let conn = db.lock().map_err(|_| "SQLite lock poisoned")?;
+    let tx = database::write_transaction(&conn)?;
+    let content = read(&tx, id)?.ok_or("No saved OCR result is available.")?;
+    if content.last_attempt_status == "running" {
+        return Err("Wait for the OCR analysis to finish before deleting detected text.".into());
+    }
+    validate_selection(&content, selection)?;
+    let mut segments = content
+        .segments
+        .ok_or("No saved OCR result is available.")?;
+    let segment = &mut segments[selection.segment_index];
+    segment
+        .observed_at_ms
+        .retain(|time| *time != selection.observed_at_ms);
+    if segment.observed_at_ms.is_empty() {
+        segments.remove(selection.segment_index);
+    }
+    let text = crate::ocr_rules::readable_text(&segments);
+    let json = serde_json::to_string(&segments).map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE history_ocr SET text=?2,segments_json=?3 WHERE history_entry_id=?1",
+        params![id, text, json],
+    )
+    .map_err(|e| format!("OCR text could not be deleted: {e}"))?;
+    let updated = read(&tx, id)?.ok_or("The OCR result is no longer available.")?;
+    tx.commit()
+        .map_err(|e| format!("OCR deletion could not be committed: {e}"))?;
+    Ok(updated)
 }

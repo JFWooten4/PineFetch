@@ -9,6 +9,7 @@ use crate::models::HistoryCaptionContent;
 use crate::models::HistoryCaptionSummary;
 use crate::models::HistoryDetails;
 use crate::models::HistoryEntry;
+use crate::models::HistoryOcrSummary;
 use crate::models::HistoryPage;
 use crate::models::HistorySourceCount;
 use crate::models::HistoryStats;
@@ -114,8 +115,10 @@ pub(super) fn search_history_page_from_db(
         .map_err(|e| format!("History read failed: {e}"))?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, url, title, uploader, filename, thumbnail, upload_date, timestamp, duration_seconds, file_size_bytes, sha256, medium, source, platform, output_path, pinefetch_version, created_at, completed_at
+            "SELECT id, url, title, uploader, filename, thumbnail, upload_date, timestamp, duration_seconds, file_size_bytes, sha256, medium, source, platform, output_path, pinefetch_version, created_at, completed_at,
+                    ocr.last_attempt_id, ocr.last_attempt_at, ocr.last_attempt_status, ocr.result_created_at
              FROM history_entries AS history
+             LEFT JOIN history_ocr AS ocr ON ocr.history_entry_id = history.id
              WHERE (?1 IS NULL
                 OR (?2 = 'title' AND history.title LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
                 OR (?2 = 'user' AND (
@@ -148,18 +151,39 @@ pub(super) fn search_history_page_from_db(
                 i64::from(offset),
                 exact_uploader,
             ],
-            map_history_entry,
+            |row| {
+                let entry = map_history_entry(row)?;
+                let attempt_id: Option<String> = row.get(18)?;
+                let ocr = attempt_id
+                    .map(|attempt_id| {
+                        Ok::<_, rusqlite::Error>(HistoryOcrSummary {
+                            history_id: entry.id.clone(),
+                            attempt_id,
+                            attempt_at: i64_to_millis(row.get(19)?),
+                            status: row.get(20)?,
+                            result_created_at: optional_i64_to_millis(row.get(21)?),
+                        })
+                    })
+                    .transpose()?;
+                Ok((entry, ocr))
+            },
         )
         .map_err(|e| format!("History read failed: {e}"))?;
 
     let mut entries = Vec::new();
+    let mut ocr_statuses = Vec::new();
     for row in rows {
-        entries.push(row.map_err(|e| format!("History read failed: {e}"))?);
+        let (entry, ocr) = row.map_err(|e| format!("History read failed: {e}"))?;
+        entries.push(entry);
+        if let Some(ocr) = ocr {
+            ocr_statuses.push(ocr);
+        }
     }
 
     let loaded_count = u64::from(offset).saturating_add(entries.len() as u64);
     Ok(HistoryPage {
         entries,
+        ocr_statuses,
         has_more: loaded_count < total.max(0) as u64,
         total_count: total.max(0) as u64,
     })
