@@ -1,6 +1,6 @@
 // This bridge exists only in the isolated screenshot browser, never in the app.
 // Titles and thumbnails are cached YouTube oEmbed data; all other values are demos.
-export const installScreenshotBridge = ({ videos, version }) => {
+export const installScreenshotBridge = ({ videos, version, ocr = null }) => {
     const listeners = new Map();
     const queue = [];
     let ready = false;
@@ -46,6 +46,20 @@ export const installScreenshotBridge = ({ videos, version }) => {
         file_size_bytes: (120 + index * 24) * 1024 * 1024,
         pinefetch_version: version,
     }));
+    const ocrHistoryId = history.find(entry => entry.url === ocr?.url)?.id;
+    const ocrContent = ocr
+        ? {
+              history_entry_id: ocrHistoryId,
+              text: null,
+              result_format: 'frames',
+              result_revision: 'screenshot-ocr-v1',
+              result_created_at: Date.parse('2026-09-20T10:00:00Z'),
+              last_attempt_id: 'screenshot-ocr-attempt',
+              last_attempt_at: Date.parse('2026-09-20T09:59:00Z'),
+              last_attempt_status: 'completed',
+              last_error: null,
+          }
+        : null;
     const queueStatus = { auto_start: false, worker_running: false, paused: false };
     const emit = (name, payload) => {
         for (const handler of listeners.get(name) || []) handler({ payload: structuredClone(payload) });
@@ -105,9 +119,34 @@ export const installScreenshotBridge = ({ videos, version }) => {
                             total_duration_seconds: history.reduce((sum, entry) => sum + entry.duration_seconds, 0),
                             source_counts: [{ source: 'youtube', count: history.length }],
                         };
-                    case 'get_history_ocr':
+                    case 'get_history_ocr': {
+                        if (!ocrContent || args.id !== ocrHistoryId) return null;
+                        if (args.resultRevision && args.resultRevision !== ocrContent.result_revision)
+                            throw new Error('The screenshot OCR results changed.');
+                        const search = (args.search || '').trim().toLocaleLowerCase();
+                        const frames = ocr.frames.filter(frame => frame.full_text.toLocaleLowerCase().includes(search));
+                        const offset = args.offset || 0;
+                        const limit = args.limit || 100;
+                        return structuredClone({
+                            ...ocrContent,
+                            frames: frames.slice(offset, offset + limit),
+                            total_count: ocr.frames.length,
+                            matched_count: frames.length,
+                            offset,
+                            has_more: offset + limit < frames.length,
+                        });
+                    }
                     case 'get_history_ocr_progress':
                         return null;
+                    case 'get_history_ocr_frame':
+                        if (
+                            !ocrContent ||
+                            args.id !== ocrHistoryId ||
+                            args.selection?.result_revision !== ocrContent.result_revision ||
+                            !ocr.frames.some(frame => frame.id === args.selection?.frame_id)
+                        )
+                            throw new Error('Missing screenshot OCR frame.');
+                        return ocr.frame;
                     case 'get_history_details': {
                         const entry = history.find(entry => entry.id === args.id);
                         if (!entry) throw new Error(`Missing history fixture: ${args.id}`);

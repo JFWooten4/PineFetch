@@ -119,7 +119,8 @@ npm run screenshots
 
 `scripts/screenshots.mjs` prepares the local design-system assets, deletes image
 files in `src/images/mockups`, then creates `browser_import.webp`, `download.webp`, `history.webp`,
-`more_data.webp` (the History Details dialog), and `settings.webp`.
+`more_data.webp` (History Details), `ocr.webp` (the OCR tab with detected text and
+a selected frame preview), and `settings.webp`.
 Non-image files are preserved. Captures use a 1400 × 1080 viewport at 2× resolution
 and WebP quality 90. The script works from any working directory and closes its
 temporary local server and browser when it finishes or fails.
@@ -129,8 +130,10 @@ in-memory Tauri bridge. Before the Download capture it loads information and
 clicks Queue for **every URL in `test/links.json`**, checks the complete queue, and
 leaves the last video's preview visible. Auto-start is disabled. History,
 connection status, paths, dates, durations, sizes and runtime versions are demo
-values. No native app, personal database, secrets, download files or running dev
-server is used.
+values. The OCR capture opens **Open OCR** from the History context menu and uses
+`test/fixtures/screenshots/ocr.json` for demo text and timestamps, with a cached
+thumbnail as its demo frame preview. No native app, personal database, secrets,
+download files or running dev server is used.
 
 Video titles, creators and thumbnails are cached from YouTube oEmbed in
 `test/fixtures/screenshots/`; screenshot generation needs no external network

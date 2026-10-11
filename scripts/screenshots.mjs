@@ -42,6 +42,12 @@ const videos = await Promise.all(
     })
 );
 const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const ocr = JSON.parse(await readFile(join(fixtureDirectory, 'ocr.json'), 'utf8'));
+assert(
+    videos.some(video => video.url === ocr.url),
+    'The OCR fixture must belong to a video in test/links.json.'
+);
+ocr.frame = `data:image/jpeg;base64,${(await readFile(join(fixtureDirectory, ocr.frame))).toString('base64')}`;
 
 await mkdir(outputDirectory, { recursive: true });
 // Refuse a redirected output directory; unlinking images must stay in this checkout.
@@ -81,7 +87,7 @@ try {
         }
         return route.abort('blockedbyclient');
     });
-    await context.addInitScript(installScreenshotBridge, { videos, version });
+    await context.addInitScript(installScreenshotBridge, { videos, version, ocr });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -162,6 +168,25 @@ try {
     await page.locator('#historyShowMoreDataBtn').click();
     await page.locator('#historyDetailsContent').waitFor({ state: 'visible' });
     await capture('more_data.webp');
+    await page.locator('#historyDetailsBackBtn').click();
+
+    const ocrHistoryId = `history-${videos.findIndex(video => video.url === ocr.url) + 1}`;
+    await page.locator(`[data-history-id="${ocrHistoryId}"] .pinefetch-history-open-btn`).click({ button: 'right' });
+    await page.locator('#historyOpenOcrBtn').click();
+    await page.locator('#historyOcrPanel').waitFor({ state: 'visible' });
+    await page.waitForFunction(
+        () => globalThis.document.querySelector('#historyOcrStatus').textContent === 'OCR complete'
+    );
+    assert.deepEqual(
+        await page.locator('#historyOcrText .oj-text').allTextContents(),
+        ocr.frames.map(frame => frame.full_text),
+        'The OCR screenshot must show all fixture frame texts.'
+    );
+    await page.locator('#historyOcrText .pinefetch-ocr-select').first().click();
+    await page.locator('#historyOcrFrame').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#historyOcrFrame').getAttribute('src'), ocr.frame);
+    assert.equal(await page.locator('#historyOcrCopyBtn').isEnabled(), true);
+    await capture('ocr.webp');
     await page.locator('#historyDetailsBackBtn').click();
 
     await page.locator('#viewLinkDumpBtn').click();

@@ -74,6 +74,8 @@ Open a History entry to inspect its metadata, transcript and saved caption track
 
 ![PineFetch History Details screen](src/images/mockups/more_data.webp)
 
+![PineFetch OCR screen](src/images/mockups/ocr.webp)
+
 ## CLI
 
 The desktop app also includes a command-line interface.
