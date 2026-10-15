@@ -1,3 +1,8 @@
+# 2.3.2
+
+- new logo
+- removed layout shift
+
 # 2.3.0
 
 - open in browser context menu in history

@@ -124,6 +124,8 @@ license notices for Tauri. No font or icon CDN is needed.
 The shared logo source is `src/images/logo.png`. After replacing it, run
 `npm run sync:icons` to regenerate the favicon and desktop icons for macOS,
 Windows and Linux, then `npm run screenshots` to refresh the README screenshots.
+The logo has transparent outer corners. Desktop icons add a centered transparent
+margin, with the artwork occupying 824 pixels of the 1024-pixel canvas.
 
 Create a macOS release build with:
 

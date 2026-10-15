@@ -13,12 +13,22 @@ const favicon = fileURLToPath(new URL('../src/images/favicon.png', import.meta.u
 const { width, height } = await sharp(source).metadata();
 assert(width === height && width >= 1024, 'The logo must be square and at least 1024 pixels wide.');
 
+// Leave optical breathing room so the desktop tile matches neighboring Dock icons.
+const desktopSize = 1024;
+const artworkSize = 824;
+const inset = (desktopSize - artworkSize) / 2;
 const temporary = await mkdtemp(join(tmpdir(), 'pinefetch-icons-'));
 try {
-    // Tauri needs RGBA input; preserve the supplied artwork and its existing alpha.
+    // Keep transparency around the rounded tile and add a centered desktop margin.
     const input = join(temporary, 'logo.png');
     const generated = join(temporary, 'icons');
-    await sharp(source).ensureAlpha().png().toFile(input);
+    const desktopIcon = await sharp(source)
+        .resize(artworkSize, artworkSize)
+        .ensureAlpha()
+        .extend({ top: inset, bottom: inset, left: inset, right: inset, background: '#00000000' })
+        .png()
+        .toBuffer();
+    await sharp(desktopIcon).toFile(input);
     await promisify(execFile)(process.execPath, [
         fileURLToPath(import.meta.resolve('@tauri-apps/cli/tauri.js')),
         'icon',
@@ -36,13 +46,13 @@ try {
     const iconset = join(destination, 'icon.iconset');
     await mkdir(iconset, { recursive: true });
     for (const size of [16, 32, 64, 128, 256, 512, 1024]) {
-        await sharp(source)
+        await sharp(desktopIcon)
             .resize(size, size)
             .ensureAlpha()
             .png()
             .toFile(join(iconset, `icon_${size}x${size}.png`));
         if (size !== 64 && size < 1024) {
-            await sharp(source)
+            await sharp(desktopIcon)
                 .resize(size * 2, size * 2)
                 .ensureAlpha()
                 .png()
