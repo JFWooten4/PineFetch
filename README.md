@@ -1,4 +1,6 @@
-# PineFetch 🍍
+<img src="src/images/logo.png" alt="PineFetch logo" width="96" height="96" />
+
+# PineFetch
 
 [![Dependabot Updates](https://github.com/oliverjessner/PineFetch/actions/workflows/dependabot/dependabot-updates/badge.svg)](https://github.com/oliverjessner/PineFetch/actions/workflows/dependabot/dependabot-updates) [![CI](https://github.com/oliverjessner/PineFetch/actions/workflows/quality.yml/badge.svg)](https://github.com/oliverjessner/PineFetch/actions/workflows/quality.yml)
 
@@ -118,6 +120,10 @@ npm run dev
 The interface uses [oj-designsystem](https://github.com/oliverjessner/oj-designsystem).
 `npm ci` prepares its complete local stylesheet, JavaScript, fonts, icons and
 license notices for Tauri. No font or icon CDN is needed.
+
+The shared logo source is `src/images/logo.png`. After replacing it, run
+`npm run sync:icons` to regenerate the favicon and desktop icons for macOS,
+Windows and Linux, then `npm run screenshots` to refresh the README screenshots.
 
 Create a macOS release build with:
 
