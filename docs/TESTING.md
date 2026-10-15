@@ -20,7 +20,7 @@ npm run build:check
 | ------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `npm run check`                 | Version, lint and formatting checks, all JavaScript and all Cargo test targets                  |
 | `npm test`                      | All JavaScript and Rust tests                                                                   |
-| `npm run test:js`               | Native Node test runner; each test file has a 30-second limit                                   |
+| `npm run test:js`               | Native Node test runner; 30 seconds per test by default                                         |
 | `npm run test:rust`             | All registered Rust tests, including the built CLI target                                       |
 | `npm run check:fast`            | Version, lint and formatting checks plus the fast tests                                         |
 | `npm run test:fast`             | JavaScript, pure Rust rules and inexpensive application/component checks                        |
@@ -28,6 +28,10 @@ npm run build:check
 | `npm run test:integration`      | Real temporary files, file-backed SQLite, fake child processes, loopback HTTP/IPC and built CLI |
 | `npm run test:rust:integration` | Same Rust integration partition                                                                 |
 | `npm run build:check`           | Release compilation/linking with embedded frontend assets; not a bundle or desktop smoke        |
+
+OCR and Whisper build tests allow 60 seconds per test and 30 seconds per child
+process. The first execution of their temporary fixture programs can take longer
+on macOS. Process start errors, timeouts and signals are reported explicitly.
 
 The pyramid has five levels:
 

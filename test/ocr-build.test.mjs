@@ -52,8 +52,8 @@ const fixture = t => {
         ].join('\n')
     );
     executable('codesign', 'if [ "${OCR_TEST_FAIL_SIGN:-0}" = 1 ]; then exit 24; fi');
-    const run = (overrides = {}, relative = false) =>
-        spawnSync('bash', [relative ? 'scripts/prepare-ocr-runtime.sh' : script], {
+    const run = (overrides = {}, relative = false) => {
+        const result = spawnSync('bash', [relative ? 'scripts/prepare-ocr-runtime.sh' : script], {
             cwd: relative ? root : tmpdir(),
             env: {
                 ...process.env,
@@ -66,57 +66,70 @@ const fixture = t => {
                 ...overrides,
             },
             encoding: 'utf8',
-            timeout: 10000,
+            // First execution of temporary fixture programs can be slow on macOS.
+            timeout: 30000,
         });
+        assert.ifError(result.error);
+        assert.equal(result.signal, null, result.stderr);
+        return result;
+    };
     const compileCount = () => readFileSync(calls, 'utf8').trim().split('\n').length;
     return { script, source, boundsSource, helper, stamp, run, compileCount };
 };
 
-test('OCR builds reuse unchanged artifacts and rebuild when source or toolchain inputs change', t => {
-    const f = fixture(t);
-    assert.equal(f.run().status, 0);
-    const helperTime = statSync(f.helper, { bigint: true }).mtimeNs;
-    const stampTime = statSync(f.stamp, { bigint: true }).mtimeNs;
-    assert.equal(f.run({}, true).status, 0);
-    assert.equal(f.compileCount(), 1);
-    assert.equal(statSync(f.helper, { bigint: true }).mtimeNs, helperTime);
-    assert.equal(statSync(f.stamp, { bigint: true }).mtimeNs, stampTime);
+test(
+    'OCR builds reuse unchanged artifacts and rebuild when source or toolchain inputs change',
+    { timeout: 60000 },
+    t => {
+        const f = fixture(t);
+        assert.equal(f.run().status, 0);
+        const helperTime = statSync(f.helper, { bigint: true }).mtimeNs;
+        const stampTime = statSync(f.stamp, { bigint: true }).mtimeNs;
+        assert.equal(f.run({}, true).status, 0);
+        assert.equal(f.compileCount(), 1);
+        assert.equal(statSync(f.helper, { bigint: true }).mtimeNs, helperTime);
+        assert.equal(statSync(f.stamp, { bigint: true }).mtimeNs, stampTime);
 
-    writeFileSync(f.source, 'changed Swift source');
-    assert.equal(f.run().status, 0);
-    assert.equal(f.compileCount(), 2);
-    assert.equal(readFileSync(f.helper, 'utf8'), 'changed Swift source');
-    writeFileSync(f.boundsSource, 'changed bounds source');
-    assert.equal(f.run().status, 0);
-    assert.equal(f.compileCount(), 3);
-    assert.equal(f.run({ MACOSX_DEPLOYMENT_TARGET: '12.0' }).status, 0);
-    assert.equal(f.compileCount(), 4);
-    assert.equal(f.run({ MACOSX_DEPLOYMENT_TARGET: '12.0', OCR_TEST_COMPILER: 'synthetic Swift 2' }).status, 0);
-    assert.equal(f.compileCount(), 5);
-});
+        writeFileSync(f.source, 'changed Swift source');
+        assert.equal(f.run().status, 0);
+        assert.equal(f.compileCount(), 2);
+        assert.equal(readFileSync(f.helper, 'utf8'), 'changed Swift source');
+        writeFileSync(f.boundsSource, 'changed bounds source');
+        assert.equal(f.run().status, 0);
+        assert.equal(f.compileCount(), 3);
+        assert.equal(f.run({ MACOSX_DEPLOYMENT_TARGET: '12.0' }).status, 0);
+        assert.equal(f.compileCount(), 4);
+        assert.equal(f.run({ MACOSX_DEPLOYMENT_TARGET: '12.0', OCR_TEST_COMPILER: 'synthetic Swift 2' }).status, 0);
+        assert.equal(f.compileCount(), 5);
+    }
+);
 
-test('failed OCR compilation or signing preserves the last build, and missing or damaged artifacts are repaired', t => {
-    const f = fixture(t);
-    assert.equal(f.run().status, 0);
-    const original = readFileSync(f.helper);
-    const stamp = readFileSync(f.stamp);
-    writeFileSync(f.source, 'new source');
-    assert.equal(f.run({ OCR_TEST_FAIL_COMPILE: '1' }).status, 23);
-    assert.deepEqual(readFileSync(f.helper), original);
-    assert.deepEqual(readFileSync(f.stamp), stamp);
-    assert.equal(f.run({ OCR_TEST_FAIL_SIGN: '1' }).status, 24);
-    assert.deepEqual(readFileSync(f.helper), original);
-    assert.deepEqual(readFileSync(f.stamp), stamp);
-    assert.equal(f.run().status, 0);
-    assert.equal(readFileSync(f.helper, 'utf8'), 'new source');
-    writeFileSync(f.helper, 'damaged helper');
-    assert.equal(f.run().status, 0);
-    assert.equal(readFileSync(f.helper, 'utf8'), 'new source');
-    rmSync(f.helper);
-    assert.equal(f.run().status, 0);
-    assert.equal(readFileSync(f.helper, 'utf8'), 'new source');
-    chmodSync(f.helper, 0o600);
-    assert.equal(f.run().status, 0);
-    assert.notEqual(statSync(f.helper).mode & 0o111, 0);
-    assert.equal(f.compileCount(), 7);
-});
+test(
+    'failed OCR compilation or signing preserves the last build, and missing or damaged artifacts are repaired',
+    { timeout: 60000 },
+    t => {
+        const f = fixture(t);
+        assert.equal(f.run().status, 0);
+        const original = readFileSync(f.helper);
+        const stamp = readFileSync(f.stamp);
+        writeFileSync(f.source, 'new source');
+        assert.equal(f.run({ OCR_TEST_FAIL_COMPILE: '1' }).status, 23);
+        assert.deepEqual(readFileSync(f.helper), original);
+        assert.deepEqual(readFileSync(f.stamp), stamp);
+        assert.equal(f.run({ OCR_TEST_FAIL_SIGN: '1' }).status, 24);
+        assert.deepEqual(readFileSync(f.helper), original);
+        assert.deepEqual(readFileSync(f.stamp), stamp);
+        assert.equal(f.run().status, 0);
+        assert.equal(readFileSync(f.helper, 'utf8'), 'new source');
+        writeFileSync(f.helper, 'damaged helper');
+        assert.equal(f.run().status, 0);
+        assert.equal(readFileSync(f.helper, 'utf8'), 'new source');
+        rmSync(f.helper);
+        assert.equal(f.run().status, 0);
+        assert.equal(readFileSync(f.helper, 'utf8'), 'new source');
+        chmodSync(f.helper, 0o600);
+        assert.equal(f.run().status, 0);
+        assert.notEqual(statSync(f.helper).mode & 0o111, 0);
+        assert.equal(f.compileCount(), 7);
+    }
+);

@@ -52,8 +52,8 @@ if (args[0] === '-c') {
     );
     chmodSync(sourcePython, 0o755);
     const runtime = join(root, 'src-tauri/resources/whisper-runtime');
-    const run = overrides =>
-        spawnSync('bash', [join(scripts, 'prepare-whisper-runtime.sh')], {
+    const run = overrides => {
+        const result = spawnSync('bash', [join(scripts, 'prepare-whisper-runtime.sh')], {
             cwd: tmpdir(),
             env: {
                 ...process.env,
@@ -62,12 +62,17 @@ if (args[0] === '-c') {
                 ...overrides,
             },
             encoding: 'utf8',
-            timeout: 10000,
+            // First execution of temporary fixture programs can be slow on macOS.
+            timeout: 30000,
         });
+        assert.ifError(result.error);
+        assert.equal(result.signal, null, result.stderr);
+        return result;
+    };
     return { runtime, run, calls: () => JSON.parse(readFileSync(calls, 'utf8')) };
 };
 
-test('Whisper builds pin PyAV and reject stale or mismatched cached dependencies', t => {
+test('Whisper builds pin PyAV and reject stale or mismatched cached dependencies', { timeout: 60000 }, t => {
     const f = fixture(t);
     assert.equal(f.run().status, 0);
     const pinnedAv = readFileSync(new URL('../scripts/whisper-av.version', import.meta.url), 'utf8').trim();
@@ -90,7 +95,7 @@ test('Whisper builds pin PyAV and reject stale or mismatched cached dependencies
     assert.equal(f.calls().length, 3);
 });
 
-test('Whisper runtime preparation fails when audio decoding fails, before marking it ready', t => {
+test('Whisper runtime preparation fails when audio decoding fails, before marking it ready', { timeout: 60000 }, t => {
     const f = fixture(t);
     const result = f.run({ WHISPER_TEST_FAIL_DECODE: '1' });
     assert.equal(result.status, 1);
