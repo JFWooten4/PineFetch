@@ -230,6 +230,14 @@ body {
     margin-block-end: 0;
 }
 
+.pinefetch-history-active .pinefetch-panel-left > .oj-section-header {
+    /* Reserve the badge height and keep it beside the title at compact widths. */
+    min-block-size: var(--oj-control-height-compact);
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+}
+
 .pinefetch-panel-right {
     overflow: hidden;
 }

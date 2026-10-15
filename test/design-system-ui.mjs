@@ -529,6 +529,31 @@ try {
                     .evaluateAll(nodes => nodes.map(node => node.dataset.ojValue)),
                 ['', 'youtube', 'tiktok']
             );
+            // Showing and clearing a search count must not move the History controls or list.
+            const historyLayout = () =>
+                page.evaluate(() =>
+                    [
+                        '.pinefetch-panel-left > .oj-section-header',
+                        '#leftPanelTitle',
+                        '.pinefetch-history-search-controls',
+                        '#historyList',
+                    ].map(selector => {
+                        const { x, y } = globalThis.document.querySelector(selector).getBoundingClientRect();
+                        return { selector, x, y };
+                    })
+                );
+            for (const width of [1400, 1000, 520]) {
+                await page.setViewportSize({ width, height: 960 });
+                await searchInput.scrollIntoViewIfNeeded();
+                const beforeSearch = await historyLayout();
+                await searchInput.fill('layout stability');
+                await resultCount.waitFor({ state: 'visible' });
+                assert.deepEqual(await historyLayout(), beforeSearch, `Search badge moved the layout at ${width}px`);
+                await searchInput.fill('');
+                await resultCount.waitFor({ state: 'hidden' });
+                assert.deepEqual(await historyLayout(), beforeSearch, `Clearing search moved the layout at ${width}px`);
+            }
+            await page.setViewportSize({ width: 1400, height: 960 });
             const assertHistoryFilterFocus = async (menuId, value) => {
                 await page.waitForFunction(
                     expected =>
