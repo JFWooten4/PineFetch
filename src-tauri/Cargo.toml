@@ -1,6 +1,6 @@
 [package]
 name = "pinefetch"
-version = "2.3.2"
+version = "2.3.3"
 description = "Local yt-dlp desktop UI"
 authors = ["Oliver Jessner"]
 license = "MIT"
@@ -32,6 +32,8 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6.12"
+muda = { version = "=0.19.3", default-features = false }
+objc2 = "=0.6.4"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

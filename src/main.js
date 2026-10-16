@@ -27,7 +27,7 @@ import {
 
 const state = createAppState();
 const els = Object.seal({
-    magicImportTrigger: document.getElementById('magicImportTrigger'),
+    brandHistoryBtn: document.getElementById('brandHistoryBtn'),
     magicImportEnabled: document.getElementById('magicImportEnabled'),
     cutAtTimestampEnabled: document.getElementById('cutAtTimestampEnabled'),
     urlInput: document.getElementById('urlInput'),
@@ -1532,9 +1532,6 @@ const bindEvents = () => {
     historyView.bindEvents();
     settings.bindEvents();
     browserImport.bindEvents();
-    els.magicImportTrigger.addEventListener('click', () => {
-        void tryMagicImport();
-    });
     window.addEventListener('focus', () => {
         void tryMagicImport();
     });
@@ -1623,6 +1620,7 @@ const bindEvents = () => {
         void clearQueue();
     });
     els.viewDownloadBtn.addEventListener('click', () => setActiveView('download'));
+    els.brandHistoryBtn.addEventListener('click', () => setActiveView('history'));
     els.viewHistoryBtn.addEventListener('click', () => setActiveView('history'));
     els.viewLinkDumpBtn.addEventListener('click', () => setActiveView('linkDump'));
     els.viewSettingsBtn.addEventListener('click', () => setActiveView('settings'));
@@ -1769,6 +1767,15 @@ const applyQueueSnapshot = jobs => {
 };
 
 const bindBackendEvents = async () => {
+    let navigationRevision = 0;
+    const applyNavigationRequest = request => {
+        if (!request || !Number.isSafeInteger(request.revision) || request.revision <= navigationRevision) return;
+        if (!['download', 'history', 'linkDump', 'settings'].includes(request.view)) return;
+        navigationRevision = request.revision;
+        setActiveView(request.view);
+    };
+    await api.onNavigationRequested(event => applyNavigationRequest(event.payload));
+    applyNavigationRequest(await api.getNavigationRequest());
     await api.onLinkDumpServerStatus(event => {
         applyLinkDumpServerStatus(event.payload);
     });
@@ -1814,7 +1821,6 @@ const init = async () => {
     els.startDownloadBtn.disabled = true;
     els.importTxtBtn.disabled = true;
     els.presetValue.textContent = 'Loading formats...';
-    settings.syncMagicImportTriggerState();
     renderQueueControls();
     bindEvents();
     const cleanupOJ = initOJ();

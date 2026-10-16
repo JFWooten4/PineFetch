@@ -34,12 +34,6 @@ export const createSettingsView = ({
 
     const isMagicImportEnabled = () => Boolean(els.magicImportEnabled?.checked);
 
-    const syncMagicImportTriggerState = () => {
-        const enabled = isMagicImportEnabled();
-        els.magicImportTrigger.disabled = !enabled;
-        els.magicImportTrigger.title = enabled ? 'Magic import from clipboard' : 'Magic import is disabled in Settings';
-    };
-
     const cacheLastDownloadedUrl = async url => {
         const nextUrl = url.trim();
         if (!nextUrl) return;
@@ -141,7 +135,6 @@ export const createSettingsView = ({
             setSelectedPresetKey(config.selected_preset_key);
             els.magicImportEnabled.checked = config.magic_import_enabled ?? true;
             els.cutAtTimestampEnabled.checked = config.cut_at_timestamp_enabled ?? true;
-            syncMagicImportTriggerState();
             updateDownloadOptionHints();
             if (isActive()) void refreshYtDlpVersionsOnce();
         } catch (err) {
@@ -195,7 +188,6 @@ export const createSettingsView = ({
             if (revision === configSaveRevision) {
                 els.settingsSaveStatus.textContent = 'Changes saved. They apply to new downloads.';
             }
-            syncMagicImportTriggerState();
             return true;
         } catch (err) {
             appendLog(`[config] ${err}`, true);
@@ -250,7 +242,6 @@ export const createSettingsView = ({
 
     const bindEvents = () => {
         els.magicImportEnabled.addEventListener('change', () => {
-            syncMagicImportTriggerState();
             void saveSettings({ magic_import_enabled: els.magicImportEnabled.checked });
         });
         els.saveCaptions.addEventListener('change', () => {
@@ -299,7 +290,6 @@ export const createSettingsView = ({
         refreshYtDlpVersionsOnce,
         save: saveSettings,
         sync: syncConfig,
-        syncMagicImportTriggerState,
         waitForPendingSave: () => configSaveQueue,
     });
 };

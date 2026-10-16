@@ -29,6 +29,7 @@ export const createTauriClient = tauri => {
         getHistoryStats: args => invoke('get_history_stats', args),
         getHistoryTranscript: args => invoke('get_history_transcript', args),
         getLinkDumpOverview: args => invoke('get_link_dump_overview', args),
+        getNavigationRequest: args => invoke('get_navigation_request', args),
         getQueue: args => invoke('get_queue', args),
         getQueueStatus: args => invoke('get_queue_status', args),
         getYtDlpInstalledVersion: args => invoke('get_yt_dlp_installed_version', args),
@@ -55,6 +56,7 @@ export const createTauriClient = tauri => {
         onHistoryChanged: handler => listen('history:changed', handler),
         onHistoryOcr: handler => listen('history:ocr', handler),
         onLinkDumpServerStatus: handler => listen('link-dump:server-status', handler),
+        onNavigationRequested: handler => listen('navigation:requested', handler),
         onQueueStatus: handler => listen('queue:status', handler),
         onQueueUpdate: handler => listen('queue:update', handler),
     });

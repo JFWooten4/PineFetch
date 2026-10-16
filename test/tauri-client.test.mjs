@@ -25,6 +25,7 @@ const commands = {
     getHistoryStats: 'get_history_stats',
     getHistoryTranscript: 'get_history_transcript',
     getLinkDumpOverview: 'get_link_dump_overview',
+    getNavigationRequest: 'get_navigation_request',
     getQueue: 'get_queue',
     getQueueStatus: 'get_queue_status',
     getYtDlpInstalledVersion: 'get_yt_dlp_installed_version',
@@ -78,6 +79,7 @@ test('subscriptions preserve names, callbacks and unsubscribe functions', async 
         onHistoryChanged: 'history:changed',
         onHistoryOcr: 'history:ocr',
         onLinkDumpServerStatus: 'link-dump:server-status',
+        onNavigationRequested: 'navigation:requested',
         onQueueStatus: 'queue:status',
         onQueueUpdate: 'queue:update',
     };

@@ -16,6 +16,8 @@ mod completion_store;
 mod config;
 mod config_rules;
 mod database;
+#[cfg(target_os = "macos")]
+mod dock_menu;
 mod download;
 mod download_rules;
 mod events;
@@ -31,6 +33,7 @@ mod link_dump_store;
 mod media_tools;
 mod metadata;
 mod models;
+mod navigation;
 mod ocr;
 mod ocr_preview;
 mod ocr_rules;
@@ -109,12 +112,18 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             app.manage(state);
+            app.manage(navigation::NavigationState::default());
+            #[cfg(target_os = "macos")]
+            if let Err(err) = dock_menu::install(app) {
+                eprintln!("Could not install Dock menu: {err}");
+            }
             let state = app.state::<AppState>();
             let _ = start_link_dump_server_from_settings(app.handle(), state.inner());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             cli::initialize_cli,
+            navigation::get_navigation_request,
             commands::get_config,
             commands::get_download_presets,
             commands::patch_config,

@@ -50,6 +50,7 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
         failNextPlaylist: false,
         playlistVideos,
         clipboard: '',
+        navigationRequest: { revision: 1, view: 'settings' },
         releasePresets,
         setHistorySources: sources => {
             historySources = [...sources];
@@ -76,6 +77,7 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
     };
     globalThis.__TAURI__.core.invoke = async (command, args = {}) => {
         ui.commands.push({ command, args });
+        if (command === 'get_navigation_request') return ui.navigationRequest;
         if (command === 'read_clipboard_text') return ui.clipboard;
         if (command === 'enqueue_playlist') {
             if (ui.holdPlaylist) {
@@ -337,6 +339,28 @@ try {
             assert(await page.locator('#startDownloadBtn').isDisabled());
             await page.evaluate(() => globalThis.__pinefetchUi.releasePresets());
             await page.waitForFunction(() => globalThis.__pinefetchScreenshot?.ready);
+            assert(await page.locator('#settingsView').isVisible());
+            // Dock requests restore startup selections and use the same views as the toolbar.
+            for (const [index, [view, panel, button]] of [
+                ['history', '#historyView', '#viewHistoryBtn'],
+                ['linkDump', '#linkDumpView', '#viewLinkDumpBtn'],
+                ['settings', '#settingsView', '#viewSettingsBtn'],
+                ['download', '#downloadView', '#viewDownloadBtn'],
+            ].entries()) {
+                await page.evaluate(payload => globalThis.__pinefetchUi.emit('navigation:requested', payload), {
+                    revision: index + 2,
+                    view,
+                });
+                assert(await page.locator(panel).isVisible());
+                assert.equal(await page.locator(button).getAttribute('aria-current'), 'page');
+            }
+            // A delayed startup response or an invalid native request cannot undo the latest selection.
+            await page.evaluate(() => {
+                const ui = globalThis.__pinefetchUi;
+                ui.emit('navigation:requested', { revision: 1, view: 'settings' });
+                ui.emit('navigation:requested', { revision: 6, view: 'unknown' });
+            });
+            assert(await page.locator('#downloadView').isVisible());
             await page.evaluate(() => globalThis.document.fonts.ready);
             assert.match(
                 await page.locator('body').evaluate(node => globalThis.getComputedStyle(node).fontFamily),
@@ -349,9 +373,9 @@ try {
                     .evaluate(node => globalThis.getComputedStyle(node, '::before').content),
                 /[^"\s]/
             );
-            await page.locator('#magicImportTrigger').focus();
+            await page.locator('#brandHistoryBtn').focus();
             await page.locator('.oj-tooltip').waitFor();
-            assert(await page.locator('#magicImportTrigger').getAttribute('aria-describedby'));
+            assert(await page.locator('#brandHistoryBtn').getAttribute('aria-describedby'));
             await page.keyboard.press('Escape');
             await page.locator('.oj-tooltip').waitFor({ state: 'hidden' });
 
@@ -510,7 +534,7 @@ try {
             assert.equal(audioRequest.filename_suffix, null);
 
             // History dropdowns preserve filters and clear a source that disappears.
-            await page.locator('#viewHistoryBtn').click();
+            await page.locator('#brandHistoryBtn').click();
             assert.equal(await page.locator('#viewHistoryBtn').getAttribute('aria-current'), 'page');
             const searchInput = page.locator('#historySearchInput');
             const resultCount = page.locator('#historyResultCount');
@@ -2129,7 +2153,7 @@ try {
                 ui.playlistVideos = entries;
                 ui.clipboard = 'https://youtube.com/playlist?list=PL_clipboard';
             }, videos);
-            await page.locator('#magicImportTrigger').click();
+            await page.evaluate(() => globalThis.dispatchEvent(new globalThis.Event('focus')));
             playlistQueueCount += videos.length;
             await page.waitForFunction(
                 count => globalThis.document.querySelectorAll('.pinefetch-queue-item').length === count,
