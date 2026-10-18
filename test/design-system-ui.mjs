@@ -44,6 +44,12 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
         failNextFrame: false,
         frameImages: {},
         failNextOcrDelete: false,
+        duplicateIds: [],
+        holdDuplicatePreview: false,
+        releaseDuplicatePreview: null,
+        holdDuplicateRemoval: false,
+        releaseDuplicateRemoval: null,
+        failDuplicateRemoval: false,
         failNextModelSave: false,
         holdPlaylist: false,
         releasePlaylist: null,
@@ -232,6 +238,43 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
             if (JSON.stringify(content.frames) !== args.selection.result_revision) throw new Error('Results changed');
             content.frames = content.frames.filter(frame => frame.id !== args.selection.frame_id);
             return ocrPage({ id: args.id });
+        }
+        if (command === 'preview_history_ocr_duplicates') {
+            const content = ocrPage({ id: args.id });
+            if (content.last_attempt_status === 'running') throw new Error('Analysis is running');
+            const preview = { duplicate_count: ui.duplicateIds.length, result_revision: content.result_revision };
+            if (ui.holdDuplicatePreview) {
+                ui.holdDuplicatePreview = false;
+                return new Promise(resolve => {
+                    ui.releaseDuplicatePreview = () => resolve(preview);
+                });
+            }
+            return preview;
+        }
+        if (command === 'remove_history_ocr_duplicates') {
+            const remove = () => {
+                if (ui.failDuplicateRemoval) throw new Error('Fixture SQLite write failed');
+                const content = ui.ocrRecords[args.id];
+                if (content.last_attempt_status === 'running') throw new Error('Analysis is running');
+                if (JSON.stringify(content.frames) !== args.resultRevision) throw new Error('Results changed');
+                const before = content.frames.length;
+                content.frames = content.frames.filter(frame => !ui.duplicateIds.includes(frame.id));
+                ui.duplicateIds = [];
+                return { removed_count: before - content.frames.length, content: ocrPage({ id: args.id }) };
+            };
+            if (ui.holdDuplicateRemoval) {
+                ui.holdDuplicateRemoval = false;
+                return new Promise((resolve, reject) => {
+                    ui.releaseDuplicateRemoval = () => {
+                        try {
+                            resolve(remove());
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                });
+            }
+            return remove();
         }
         if (command === 'start_history_ocr') {
             if (ui.ocrProgress[args.id]) return structuredClone(ui.ocrProgress[args.id]);
@@ -1124,6 +1167,7 @@ try {
             await closeDetails();
             await openOcr('history-1', true);
             await expectOcrStatus('Checking for OCR…');
+            assert(await page.locator('#historyOcrDuplicatesBtn').isDisabled());
             assert.deepEqual(await page.evaluate(() => Object.keys(globalThis.__pinefetchUi.ocrProgress)), [
                 'history-1',
             ]);
@@ -1811,6 +1855,151 @@ try {
             await page.evaluate(() => globalThis.__pinefetchUi.releaseFrame());
             assert.equal(await page.locator('#historyOcrFrame').getAttribute('src'), survivingImage);
             assert.equal(await page.locator('#historyOcrText li').getAttribute('data-ocr-key'), 'precise-b');
+            await closeDetails();
+            // Bulk cleanup counts every stored frame even with no matching UI rows.
+            await page.evaluate(() => {
+                const ui = globalThis.__pinefetchUi;
+                ui.ocrRecords['history-2'].frames = [
+                    ...Array.from({ length: 350 }, (_, index) => ({
+                        id: `duplicate-${index}`,
+                        frame_key: index,
+                        timestamp_ms: index * 1000,
+                        full_text: 'Repeated OCR text',
+                    })),
+                    { id: 'unique-after', frame_key: 350, timestamp_ms: 350000, full_text: 'Later unique text' },
+                ];
+                ui.duplicateIds = Array.from({ length: 349 }, (_, index) => `duplicate-${index + 1}`);
+            });
+            await openOcr('history-2');
+            await expectOcrStatus('OCR complete');
+            assert.equal(await page.locator('#historyOcrText li').count(), 100);
+            await searchOcr('not in these results');
+            const duplicatesButton = page.getByRole('button', { name: 'Remove All Duplicates', exact: true });
+            const bulkDialog = page.getByRole('dialog', { name: 'Remove all duplicate OCR frames?' });
+            const removalCalls = () =>
+                page.evaluate(
+                    () =>
+                        globalThis.__pinefetchUi.commands.filter(
+                            call => call.command === 'remove_history_ocr_duplicates'
+                        ).length
+                );
+            const initialRemovals = await removalCalls();
+            await duplicatesButton.focus();
+            await page.keyboard.press('Enter');
+            await bulkDialog.waitFor();
+            assert.match(await bulkDialog.textContent(), /349 duplicate OCR frames/);
+            assert.equal(await page.evaluate(() => globalThis.document.activeElement.textContent), 'Cancel');
+            await page.keyboard.press('Escape');
+            await bulkDialog.waitFor({ state: 'hidden' });
+            assert.equal(await removalCalls(), initialRemovals);
+            await page.waitForFunction(() => globalThis.document.activeElement.id === 'historyOcrDuplicatesBtn');
+            // Keep a surviving selection and retain the active search after cleanup.
+            await searchOcr('Later unique');
+            await page.locator('#historyOcrFrame').waitFor();
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdDuplicateRemoval = true;
+            });
+            await duplicatesButton.click();
+            await bulkDialog.getByRole('button', { name: 'Remove duplicates', exact: true }).click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseDuplicateRemoval));
+            assert.equal(await page.locator('#historyOcrDuplicatesBtn').getAttribute('aria-busy'), 'true');
+            for (const selector of [
+                '#historyOcrDuplicatesBtn',
+                '#historyOcrCopyBtn',
+                '#historyOcrStartBtn',
+                '#historyOcrSearchInput',
+                '.pinefetch-ocr-delete',
+            ])
+                assert(await page.locator(selector).isDisabled());
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseDuplicateRemoval());
+            await page.waitForFunction(() => globalThis.__pinefetchUi.ocrRecords['history-2'].frames.length === 2);
+            await page.getByText('Removed 349 duplicate OCR frames.', { exact: true }).waitFor();
+            await page.locator('#historyOcrFrame').waitFor();
+            assert.equal(
+                await page.locator('.pinefetch-ocr-result[aria-current="true"]').getAttribute('data-ocr-key'),
+                'unique-after'
+            );
+            assert.equal(await page.locator('#historyOcrSearchInput').inputValue(), 'Later unique');
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:05:50');
+            await page.locator('#historyOcrCopyBtn').click();
+            assert.equal(
+                await page.evaluate(() => globalThis.__pinefetchUi.copied),
+                '[00:00:00.000]\nRepeated OCR text\n\n[00:05:50.000]\nLater unique text'
+            );
+            await searchOcr('Repeated');
+            assert.equal(await page.locator('#historyOcrText li').count(), 1);
+            await duplicatesButton.click();
+            await page.getByText('No duplicate OCR frames found.', { exact: true }).waitFor();
+            assert.equal(await removalCalls(), initialRemovals + 1);
+            assert.equal(await bulkDialog.count(), 0);
+            // A selected duplicate is replaced, and its late image is discarded.
+            await closeDetails();
+            await page.evaluate(() => {
+                const ui = globalThis.__pinefetchUi;
+                ui.ocrRecords['history-2'].frames = [
+                    { id: 'keep-first', frame_key: 0, timestamp_ms: 0, full_text: 'Repeated text' },
+                    { id: 'drop-selected', frame_key: 1, timestamp_ms: 1000, full_text: 'Repeated text' },
+                ];
+                ui.duplicateIds = ['drop-selected'];
+            });
+            await openOcr('history-2');
+            await expectOcrStatus('OCR complete');
+            await page.locator('#historyOcrFrame').waitFor();
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdFrame = true;
+                globalThis.__pinefetchUi.releaseFrame = null;
+            });
+            await page.locator('.pinefetch-ocr-select').nth(1).click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseFrame));
+            // A write error keeps rows, selection and original revision available.
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failDuplicateRemoval = true;
+            });
+            await duplicatesButton.click();
+            await bulkDialog.getByRole('button', { name: 'Remove duplicates', exact: true }).click();
+            await page.locator('#historyOcrActionNotice').waitFor();
+            assert.equal(await page.locator('#historyOcrText li').count(), 2);
+            assert.equal(
+                await page.locator('.pinefetch-ocr-result[aria-current="true"]').getAttribute('data-ocr-key'),
+                'drop-selected'
+            );
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failDuplicateRemoval = false;
+            });
+            // A newer result between preview and confirmation is rejected.
+            await duplicatesButton.click();
+            await bulkDialog.waitFor();
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.ocrRecords['history-2'].frames[1].full_text = 'Changed text';
+            });
+            await bulkDialog.getByRole('button', { name: 'Remove duplicates', exact: true }).click();
+            await page.waitForFunction(() =>
+                globalThis.document.querySelector('#historyOcrActionNotice').textContent.includes('results changed')
+            );
+            assert.equal(await page.locator('#historyOcrText li').count(), 2);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.ocrRecords['history-2'].frames[1].full_text = 'Repeated text';
+            });
+            await duplicatesButton.click();
+            await bulkDialog.getByRole('button', { name: 'Remove duplicates', exact: true }).click();
+            await page.waitForFunction(() => globalThis.document.querySelectorAll('#historyOcrText li').length === 1);
+            await page.locator('#historyOcrFrame').waitFor();
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseFrame());
+            assert.equal(
+                await page.locator('.pinefetch-ocr-result[aria-current="true"]').getAttribute('data-ocr-key'),
+                'keep-first'
+            );
+            assert.equal(await page.locator('#historyOcrFrameTime').textContent(), '00:00:00');
+            // A late preview after detail navigation must not open a dialog.
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdDuplicatePreview = true;
+            });
+            await duplicatesButton.click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseDuplicatePreview));
+            await closeDetails();
+            await openOcr('history-1');
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseDuplicatePreview());
+            assert.equal(await bulkDialog.count(), 0);
             await closeDetails();
             await page.evaluate(() => {
                 const content = globalThis.__pinefetchUi.ocrRecords['history-2'];

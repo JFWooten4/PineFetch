@@ -159,6 +159,8 @@ fn main() {
             commands::get_history_ocr_progress,
             commands::get_history_ocr_frame,
             commands::delete_history_ocr_frame_text,
+            commands::preview_history_ocr_duplicates,
+            commands::remove_history_ocr_duplicates,
             commands::remove_history_entry,
             commands::clear_history,
             commands::get_link_dump_overview,

@@ -5,6 +5,50 @@ pub(crate) const SAMPLE_INTERVAL_SECONDS: f64 = 1.0;
 pub(crate) const MIN_TEXT_CHARACTERS: usize = 4;
 pub(crate) const MAX_RESULT_BYTES: usize = 32 * 1024 * 1024;
 
+/// One chronological pass. Compare against the last kept text, but advance the
+/// continuity cursor even when deleting a duplicate so long runs stay connected.
+#[derive(Default)]
+pub(crate) struct DuplicateRun {
+    kept_text: String,
+    previous: Option<(u64, Option<u64>)>,
+}
+
+impl DuplicateRun {
+    pub(crate) fn push(&mut self, time: u64, key: Option<u64>, text: &str) -> bool {
+        if text.split_whitespace().next().is_none() {
+            self.previous = None;
+            self.kept_text.clear();
+            return false;
+        }
+        let consecutive = self.previous.is_some_and(|(previous_time, previous_key)| {
+            let Some(gap) = time.checked_sub(previous_time).filter(|gap| *gap > 0) else {
+                return false;
+            };
+            match (previous_key, key) {
+                // Allow modest timestamp variation, never bridge a missing sample.
+                (Some(previous), Some(current)) => {
+                    previous.checked_add(1) == Some(current)
+                        && gap as f64 <= SAMPLE_INTERVAL_SECONDS * 1500.0
+                }
+                // Unknown legacy identity: at most one sampling interval.
+                (None, None) => gap as f64 <= SAMPLE_INTERVAL_SECONDS * 1000.0,
+                _ => false,
+            }
+        });
+        let duplicate = consecutive
+            && self
+                .kept_text
+                .split_whitespace()
+                .eq(text.split_whitespace());
+        self.previous = Some((time, key));
+        if !duplicate {
+            self.kept_text.clear();
+            self.kept_text.push_str(text);
+        }
+        duplicate
+    }
+}
+
 pub(crate) fn validate_ready(ready: &serde_json::Value) -> Result<(), String> {
     let settings = &ready["settings"];
     let languages = settings["recognition_languages"].as_array();

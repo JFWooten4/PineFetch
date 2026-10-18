@@ -1465,3 +1465,285 @@ fn integration_ocr_cancellation_is_separate_from_download_processes_and_double_s
     crate::process::terminate_child_process_tree(&mut child.lock().unwrap()).unwrap();
     child.lock().unwrap().wait().unwrap();
 }
+
+#[test]
+fn duplicate_comparison_preserves_content_and_requires_sample_and_time_continuity() {
+    let cases = [
+        ("Hello World", "Hello World", Some(1), Some(2), 1000, true),
+        (
+            " Hello\nWorld\t",
+            "Hello  World",
+            Some(1),
+            Some(2),
+            1000,
+            true,
+        ),
+        (
+            "Hello\u{a0}World",
+            "Hello\r\nWorld",
+            Some(1),
+            Some(2),
+            1000,
+            true,
+        ),
+        ("Hello World", "hello World", Some(1), Some(2), 1000, false),
+        ("Hello World!", "Hello World", Some(1), Some(2), 1000, false),
+        (
+            "Hello World",
+            "Hello World\nNew information",
+            Some(1),
+            Some(2),
+            1000,
+            false,
+        ),
+        (
+            "Hello World",
+            "Something new",
+            Some(1),
+            Some(2),
+            1000,
+            false,
+        ),
+        ("Hello World", "Hello World", Some(1), Some(3), 1000, false),
+        ("Hello World", "Hello World", Some(1), Some(2), 1500, true),
+        ("Hello World", "Hello World", Some(1), Some(2), 1501, false),
+        ("Hello World", "Hello World", Some(1), Some(2), 60000, false),
+        ("Hello World", "Hello World", Some(1), Some(2), 0, false),
+        ("Hello World", "Hello World", None, None, 1000, true),
+        ("Hello World", "Hello World", None, None, 1001, false),
+        ("Hello World", "Hello World", None, Some(2), 1000, false),
+        ("Hello World", "Hello World", Some(1), None, 1000, false),
+    ];
+    for (first, second, first_key, second_key, gap, expected) in cases {
+        let mut run = ocr_rules::DuplicateRun::default();
+        assert!(!run.push(0, first_key, first));
+        assert_eq!(
+            run.push(gap, second_key, second),
+            expected,
+            "{first:?}, {second:?}, {first_key:?}, {second_key:?}, {gap}"
+        );
+    }
+    for empty in ["", " \n\t"] {
+        let mut run = ocr_rules::DuplicateRun::default();
+        assert!(!run.push(0, Some(0), "Hello World"));
+        assert!(!run.push(1000, Some(1), empty));
+        assert!(!run.push(2000, Some(2), "Hello World"));
+        assert!(run.push(3000, Some(3), "Hello World"));
+    }
+}
+
+fn save_duplicate_fixture(db: &Database, count: u64) -> OcrResult {
+    let mut saved = result("");
+    let mut builder = FrameBuilder::default();
+    for index in 0..count {
+        builder
+            .push(
+                index,
+                index * 1000,
+                vec![observation(
+                    " Hello\nWorld! ",
+                    0.1 + (index % 3) as f64 / 10.0,
+                )],
+            )
+            .unwrap();
+    }
+    saved.frames = builder.frames;
+    // Insertion order is deliberately different from chronological processing.
+    saved.frames.reverse();
+    ocr_store::begin(db, "video", "duplicates").unwrap();
+    ocr_store::finish(db, "video", "duplicates", &saved).unwrap();
+    saved
+}
+
+#[test]
+fn duplicate_removal_scans_all_thousands_of_frames_preserves_metadata_and_is_idempotent() {
+    let db = db();
+    let saved = save_duplicate_fixture(&db, 7201);
+    let before = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(before.frames.len(), 100);
+    let parent = || {
+        db.lock().unwrap().query_row("SELECT text,segments_json,result_format,source_sha256,engine,engine_version,settings_json,result_created_at,last_attempt_id,last_attempt_status,last_attempt_at,last_error FROM history_ocr WHERE history_entry_id='video'", [], |row| {
+            Ok((0..12).map(|i| row.get::<_, rusqlite::types::Value>(i).unwrap()).collect::<Vec<_>>())
+        }).unwrap()
+    };
+    let metadata = parent();
+    let first = saved.frames.last().unwrap();
+    let blocks_before: String = db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT blocks_json FROM history_ocr_frames WHERE id=?1",
+            [&first.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    // Count revision writes, so changing it once per row would fail this test.
+    db.lock().unwrap().execute_batch("CREATE TABLE revision_writes (revision TEXT); CREATE TRIGGER count_revision AFTER UPDATE OF result_revision ON history_ocr BEGIN INSERT INTO revision_writes VALUES (NEW.result_revision); END;").unwrap();
+    let preview = ocr_store::preview_duplicates(&db, "video").unwrap();
+    assert_eq!(preview.duplicate_count, 7200);
+    assert_eq!(
+        Some(&preview.result_revision),
+        before.result_revision.as_ref()
+    );
+    assert_eq!(
+        ocr_store::get(&db, "video").unwrap().unwrap().total_count,
+        7201
+    );
+    let removed = ocr_store::remove_duplicates(&db, "video", &preview.result_revision).unwrap();
+    assert_eq!(removed.removed_count, 7200);
+    assert_eq!(removed.content.total_count, 1);
+    assert_eq!(removed.content.frames[0].id, first.id);
+    assert_eq!(removed.content.frames[0].full_text, first.full_text);
+    assert_eq!(parent(), metadata);
+    let blocks_after: String = db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT blocks_json FROM history_ocr_frames WHERE id=?1",
+            [&first.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(blocks_before, blocks_after);
+    let revision = removed.content.result_revision.as_deref().unwrap();
+    assert_ne!(revision, preview.result_revision);
+    assert_eq!(
+        ocr_store::export_text(&db, "video", Some(revision)).unwrap(),
+        "[00:00:00.000]\n Hello\nWorld! "
+    );
+    let found = ocr_store::page(&db, "video", 100, 0, "World!", Some(revision))
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.matched_count, 1);
+    assert_eq!(found.frames, removed.content.frames);
+    assert_eq!(
+        ocr_store::preview_duplicates(&db, "video")
+            .unwrap()
+            .duplicate_count,
+        0
+    );
+    let again = ocr_store::remove_duplicates(&db, "video", revision).unwrap();
+    assert_eq!(again.removed_count, 0);
+    assert_eq!(again.content.result_revision.as_deref(), Some(revision));
+    assert_eq!(
+        db.lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM revision_writes", [], |r| r
+                .get::<_, u64>(0))
+            .unwrap(),
+        1
+    );
+    assert!(
+        ocr_store::remove_duplicates(&db, "video", &preview.result_revision)
+            .unwrap_err()
+            .contains("changed")
+    );
+}
+
+#[test]
+fn duplicate_removal_keeps_reappearances_after_different_empty_missing_and_legacy_samples() {
+    let db = db();
+    let mut builder = FrameBuilder::default();
+    for (key, time, text) in [
+        (0, 0, "Hello World"),
+        (1, 1000, "Hello World"),
+        (2, 2000, "Something new"),
+        (3, 3000, "Hello World"),
+        (4, 4000, ""),
+        (5, 5000, "Hello World"),
+        (6, 6000, "Hello World"),
+        (7, 20000, "Hello World"),
+        (8, 21000, "Hello World"),
+        (9, 22000, "Hello World\nNew information"),
+        (10, 23000, "Hello World"),
+    ] {
+        builder
+            .push(
+                key,
+                time,
+                if text.is_empty() {
+                    vec![]
+                } else {
+                    vec![observation(text, 0.1)]
+                },
+            )
+            .unwrap();
+    }
+    let mut saved = result("");
+    saved.frames = builder.frames;
+    // Append genuine legacy rows with unknown sample identity and a long gap.
+    for (index, time) in [24000, 25000, 28000, 29000].into_iter().enumerate() {
+        let mut frame = saved.frames[0].clone();
+        frame.id = format!("legacy-{index}");
+        frame.timestamp_ms = time;
+        frame.frame_key = None;
+        saved.frames.push(frame);
+    }
+    ocr_store::begin(&db, "video", "mixed").unwrap();
+    ocr_store::finish(&db, "video", "mixed", &saved).unwrap();
+    let preview = ocr_store::preview_duplicates(&db, "video").unwrap();
+    assert_eq!(preview.duplicate_count, 5);
+    let removed = ocr_store::remove_duplicates(&db, "video", &preview.result_revision).unwrap();
+    assert_eq!(
+        removed
+            .content
+            .frames
+            .iter()
+            .map(|f| f.timestamp_ms)
+            .collect::<Vec<_>>(),
+        [0, 2000, 3000, 5000, 20000, 22000, 23000, 24000, 28000]
+    );
+    // An explicitly stored whitespace-only OCR sample also breaks the chain.
+    db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE history_ocr_frames SET full_text=' ' WHERE timestamp_ms=22000",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        ocr_store::preview_duplicates(&db, "video")
+            .unwrap()
+            .duplicate_count,
+        0
+    );
+}
+
+#[test]
+fn duplicate_removal_rejects_running_analysis_stale_results_and_rolls_back_sqlite_failures() {
+    let db = db();
+    save_duplicate_fixture(&db, 3);
+    let before = ocr_store::get(&db, "video").unwrap().unwrap();
+    let preview = ocr_store::preview_duplicates(&db, "video").unwrap();
+    assert_eq!(preview.duplicate_count, 2);
+    ocr_store::begin(&db, "video", "concurrent").unwrap();
+    assert!(ocr_store::preview_duplicates(&db, "video")
+        .unwrap_err()
+        .contains("finish"));
+    assert!(
+        ocr_store::remove_duplicates(&db, "video", &preview.result_revision)
+            .unwrap_err()
+            .contains("finish")
+    );
+    ocr_store::fail(&db, "video", "concurrent", "cancelled", "Cancelled").unwrap();
+    for trigger in [
+        "CREATE TRIGGER reject_duplicate BEFORE DELETE ON history_ocr_frames WHEN OLD.timestamp_ms=2000 BEGIN SELECT RAISE(ABORT,'synthetic delete failure'); END;",
+        "CREATE TRIGGER reject_duplicate BEFORE UPDATE OF result_revision ON history_ocr BEGIN SELECT RAISE(ABORT,'synthetic revision failure'); END;",
+    ] {
+        db.lock().unwrap().execute_batch(trigger).unwrap();
+        assert!(ocr_store::remove_duplicates(&db, "video", &preview.result_revision).is_err());
+        let after = ocr_store::get(&db, "video").unwrap().unwrap();
+        assert_eq!(after.frames, before.frames);
+        assert_eq!(after.result_revision, before.result_revision);
+        db.lock().unwrap().execute_batch("DROP TRIGGER reject_duplicate").unwrap();
+    }
+    // Publishing a newer analysis makes the preview unusable, even for equal text.
+    ocr_store::begin(&db, "video", "new-result").unwrap();
+    ocr_store::finish(&db, "video", "new-result", &result("Hello World")).unwrap();
+    assert!(
+        ocr_store::remove_duplicates(&db, "video", &preview.result_revision)
+            .unwrap_err()
+            .contains("changed")
+    );
+    assert!(ocr_store::preview_duplicates(&db, "missing").is_err());
+}

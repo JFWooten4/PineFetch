@@ -145,6 +145,7 @@ const els = Object.seal({
     historyOcrFramesTotal: document.getElementById('historyOcrFramesTotal'),
     historyOcrCancelBtn: document.getElementById('historyOcrCancelBtn'),
     historyOcrCopyBtn: document.getElementById('historyOcrCopyBtn'),
+    historyOcrDuplicatesBtn: document.getElementById('historyOcrDuplicatesBtn'),
     historyOcrText: document.getElementById('historyOcrText'),
     historyOcrAnalyzed: document.getElementById('historyOcrAnalyzed'),
     historyOcrPreviousResult: document.getElementById('historyOcrPreviousResult'),

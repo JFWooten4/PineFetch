@@ -1,3 +1,7 @@
+# 2.4.0
+
+- Added “Remove All Duplicates” to OCR results, with a count preview, confirmation and atomic removal of consecutive identical frame texts.
+
 # 2.3.3
 
 - context menu

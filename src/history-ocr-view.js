@@ -57,6 +57,8 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         frameImage: '',
         frameError: '',
         deleting: false,
+        cleaning: false,
+        cleanupRequest: 0,
         deleteRequest: 0,
         actionError: '',
     };
@@ -104,7 +106,12 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
     };
     const updateRowControls = () => {
         const selectedKey = state.selected ? rowKey(state.selected) : null;
-        const busy = state.loading || state.pageLoading || state.deleting || ocrActive(jobs.get(state.id)?.status);
+        const busy =
+            state.loading ||
+            state.pageLoading ||
+            state.deleting ||
+            state.cleaning ||
+            ocrActive(jobs.get(state.id)?.status);
         for (const [key, { item, time, remove }] of state.rowElements) {
             const selected = key === selectedKey;
             item.setAttribute('aria-current', String(selected));
@@ -158,7 +165,14 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         renderPreview();
     };
     const deleteRow = async row => {
-        if (!row.id || state.deleting || state.loading || state.pageLoading || ocrActive(jobs.get(state.id)?.status))
+        if (
+            !row.id ||
+            state.deleting ||
+            state.cleaning ||
+            state.loading ||
+            state.pageLoading ||
+            ocrActive(jobs.get(state.id)?.status)
+        )
             return;
         const id = state.id;
         const selected = selection(row);
@@ -210,9 +224,27 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
     };
     const renderResults = () => {
         els.historyOcrCopyBtn.disabled =
-            !hasResult() || (!state.content.total_count && !state.content.text) || state.copying || state.deleting;
+            !hasResult() ||
+            (!state.content.total_count && !state.content.text) ||
+            state.copying ||
+            state.deleting ||
+            state.cleaning;
         els.historyOcrCopyBtn.setAttribute('aria-busy', String(state.copying));
-        els.historyOcrSearchInput.disabled = !hasResult();
+        els.historyOcrDuplicatesBtn.disabled =
+            !hasResult() ||
+            !state.content?.result_revision ||
+            !state.content?.total_count ||
+            state.loading ||
+            state.pageLoading ||
+            state.deleting ||
+            state.cleaning ||
+            state.copying ||
+            !api.available ||
+            ocrActive(jobs.get(state.id)?.status) ||
+            state.content?.last_attempt_status === 'running';
+        els.historyOcrDuplicatesBtn.setAttribute('aria-busy', String(state.cleaning));
+        els.historyOcrDuplicatesBtn.textContent = state.cleaning ? 'Checking duplicates…' : 'Remove All Duplicates';
+        els.historyOcrSearchInput.disabled = !hasResult() || state.cleaning || state.deleting;
         const rows = state.rows;
         if (
             state.selected &&
@@ -286,7 +318,7 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         els.historyOcrEmpty.hidden = rows.length > 0;
         els.historyOcrEmpty.textContent = state.emptyMessage;
         els.historyOcrLoadMoreBtn.hidden = !state.content?.has_more;
-        els.historyOcrLoadMoreBtn.disabled = state.pageLoading || state.loading || state.deleting;
+        els.historyOcrLoadMoreBtn.disabled = state.pageLoading || state.loading || state.deleting || state.cleaning;
         els.historyOcrListViewport.setAttribute('aria-busy', String(state.pageLoading));
         updateRowControls();
         renderPreview();
@@ -334,7 +366,8 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         els.historyOcrNotice.textContent = error ? ocrErrorMessage(error) : '';
         els.historyOcrNotice.hidden = !error || (status === 'cancelled' && !state.startError);
         els.historyOcrStartBtn.hidden = active;
-        els.historyOcrStartBtn.disabled = state.loading || state.pageLoading || state.deleting || !api.available;
+        els.historyOcrStartBtn.disabled =
+            state.loading || state.pageLoading || state.deleting || state.cleaning || !api.available;
         els.historyOcrStartBtn.textContent =
             status === 'failed' || status === 'interrupted'
                 ? 'Retry Analysis'
@@ -407,6 +440,8 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         state.startError = '';
         state.cancelling = false;
         state.deleting = false;
+        state.cleaning = false;
+        state.cleanupRequest += 1;
         state.deleteRequest += 1;
         state.actionError = '';
         clearFrame();
@@ -471,7 +506,7 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
         }
     };
     const load = async () => {
-        if (!state.id || !visible() || state.disposed || state.deleting) return;
+        if (!state.id || !visible() || state.disposed || state.deleting || state.cleaning) return;
         const id = state.id;
         const request = ++state.request;
         state.pageRequest += 1;
@@ -502,10 +537,77 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
             render();
         }
     };
+    const removeDuplicates = async () => {
+        if (els.historyOcrDuplicatesBtn.disabled) return;
+        const id = state.id;
+        const revision = state.content.result_revision;
+        const request = ++state.cleanupRequest;
+        const current = () => id === state.id && request === state.cleanupRequest && !state.disposed;
+        state.cleaning = true;
+        state.actionError = '';
+        render();
+        try {
+            const preview = await api.previewHistoryOcrDuplicates({ id });
+            if (!current() || !visible()) return;
+            if (preview.result_revision !== revision) throw new Error('OCR results changed.');
+            if (!preview.duplicate_count) {
+                toast('No duplicate OCR frames found.');
+                return;
+            }
+            const confirmed = await confirmDialog({
+                title: 'Remove all duplicate OCR frames?',
+                message: `Remove ${preview.duplicate_count.toLocaleString()} duplicate OCR ${preview.duplicate_count === 1 ? 'frame' : 'frames'} from all saved results? The first frame of each consecutive repetition is kept. The saved video stays unchanged.`,
+                confirmLabel: 'Remove duplicates',
+                variant: 'danger',
+            });
+            if (!confirmed || !current() || !visible()) return;
+            if (state.content?.result_revision !== revision || ocrActive(jobs.get(id)?.status))
+                throw new Error('OCR results changed or analysis is running.');
+            const selected = state.selected;
+            const index = Math.max(
+                0,
+                state.rows.findIndex(row => row.id === selected?.id)
+            );
+            state.request += 1;
+            state.pageRequest += 1;
+            const result = await api.removeHistoryOcrDuplicates({ id, resultRevision: preview.result_revision });
+            if (!current()) return;
+            state.content = result.content;
+            clearFrame();
+            state.pendingSelection = { id: selected?.id, index };
+            await loadPage(false);
+            if (!current()) return;
+            toast(
+                result.removed_count
+                    ? `Removed ${result.removed_count.toLocaleString()} duplicate OCR ${result.removed_count === 1 ? 'frame' : 'frames'}.`
+                    : 'No duplicate OCR frames found.',
+                { type: 'success' }
+            );
+        } catch (error) {
+            appendLog(`[OCR duplicates] ${error}`, true);
+            if (!current()) return;
+            state.actionError = /changed|no longer/i.test(String(error))
+                ? 'OCR results changed. Reopen OCR and try again.'
+                : 'Duplicate OCR frames could not be removed. Wait for analysis to finish and try again.';
+        } finally {
+            if (current()) {
+                state.cleaning = false;
+                render();
+                if (visible())
+                    (els.historyOcrDuplicatesBtn.disabled
+                        ? els.historyOcrListViewport
+                        : els.historyOcrDuplicatesBtn
+                    ).focus({ preventScroll: true });
+                const job = jobs.get(id);
+                if (job?.attempt_id && job.attempt_id !== state.content?.last_attempt_id) void load();
+            }
+        }
+    };
     const bindEvents = () => {
+        els.historyOcrDuplicatesBtn.addEventListener('click', () => void removeDuplicates());
         els.historyOcrStartBtn.addEventListener('click', async () => {
             const id = state.id;
-            if (!id || state.loading || state.deleting) return;
+            if (!id || state.loading || state.deleting || state.cleaning) return;
             state.startError = '';
             try {
                 await jobs.start(id);
@@ -537,7 +639,7 @@ export const createHistoryOcrView = ({ els, api, appendLog, jobs }) => {
             }
         });
         els.historyOcrCopyBtn.addEventListener('click', async () => {
-            if (!hasResult() || state.copying) return;
+            if (!hasResult() || state.copying || state.deleting || state.cleaning) return;
             const id = state.id;
             const revision = state.content.result_revision;
             state.copying = true;

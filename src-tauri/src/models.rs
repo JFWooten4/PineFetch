@@ -485,6 +485,18 @@ pub(crate) struct OcrSelection {
     pub(crate) frame_id: String,
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct OcrDuplicatePreview {
+    pub(crate) duplicate_count: u64,
+    pub(crate) result_revision: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct OcrDuplicateRemoval {
+    pub(crate) removed_count: u64,
+    pub(crate) content: OcrContent,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct OcrFrameSummary {
     pub(crate) id: String,

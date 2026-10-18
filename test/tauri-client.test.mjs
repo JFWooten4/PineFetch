@@ -20,6 +20,8 @@ const commands = {
     getHistoryOcrProgress: 'get_history_ocr_progress',
     getHistoryOcrFrame: 'get_history_ocr_frame',
     deleteHistoryOcrFrameText: 'delete_history_ocr_frame_text',
+    previewHistoryOcrDuplicates: 'preview_history_ocr_duplicates',
+    removeHistoryOcrDuplicates: 'remove_history_ocr_duplicates',
     startHistoryOcr: 'start_history_ocr',
     cancelHistoryOcr: 'cancel_history_ocr',
     getHistoryStats: 'get_history_stats',

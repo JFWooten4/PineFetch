@@ -1,7 +1,9 @@
 //! Short, guarded SQLite operations. Result fields survive every failed attempt.
 use crate::database::{self, Database};
 use crate::files::current_timestamp_millis;
-use crate::models::{OcrContent, OcrFrameSummary, OcrResult, OcrSelection};
+use crate::models::{
+    OcrContent, OcrDuplicatePreview, OcrDuplicateRemoval, OcrFrameSummary, OcrResult, OcrSelection,
+};
 use crate::ocr_rules::{self, OcrBlock, OcrFrame, OcrSegment};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeMap;
@@ -284,6 +286,86 @@ pub(crate) fn export_text(
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(text)
+}
+
+fn editable_result(conn: &Connection, id: &str) -> Result<OcrContent, String> {
+    let content = read(conn, id)?.ok_or("No saved OCR result is available.")?;
+    if content.last_attempt_status == "running" {
+        return Err("Wait for the OCR analysis to finish before removing detected text.".into());
+    }
+    if content.result_revision.is_none() {
+        return Err("No saved OCR result is available.".into());
+    }
+    Ok(content)
+}
+
+fn duplicate_ids(conn: &Connection, id: &str) -> Result<Vec<String>, String> {
+    let mut stmt = conn.prepare("SELECT id,timestamp_ms,frame_key,full_text FROM history_ocr_frames WHERE history_entry_id=?1 ORDER BY timestamp_ms,id")
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([id]).map_err(|e| e.to_string())?;
+    let mut run = ocr_rules::DuplicateRun::default();
+    let mut duplicates = Vec::new();
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let text = row
+            .get_ref(3)
+            .map_err(|e| e.to_string())?
+            .as_str()
+            .map_err(|e| e.to_string())?;
+        if run.push(
+            row.get(1).map_err(|e| e.to_string())?,
+            row.get(2).map_err(|e| e.to_string())?,
+            text,
+        ) {
+            duplicates.push(row.get(0).map_err(|e| e.to_string())?);
+        }
+    }
+    Ok(duplicates)
+}
+
+pub(crate) fn preview_duplicates(db: &Database, id: &str) -> Result<OcrDuplicatePreview, String> {
+    let conn = db.lock().map_err(|_| "SQLite lock poisoned")?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let content = editable_result(&tx, id)?;
+    let duplicate_count = duplicate_ids(&tx, id)?.len() as u64;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(OcrDuplicatePreview {
+        duplicate_count,
+        result_revision: content.result_revision.unwrap(),
+    })
+}
+
+pub(crate) fn remove_duplicates(
+    db: &Database,
+    id: &str,
+    revision: &str,
+) -> Result<OcrDuplicateRemoval, String> {
+    let conn = db.lock().map_err(|_| "SQLite lock poisoned")?;
+    // BEGIN IMMEDIATE serializes other app instances and analysis starts/saves.
+    let tx = database::write_transaction(&conn)?;
+    let content = editable_result(&tx, id)?;
+    validate_revision(&content, Some(revision))?;
+    let duplicates = duplicate_ids(&tx, id)?;
+    let mut removed_count = 0;
+    if !duplicates.is_empty() {
+        let mut delete = tx
+            .prepare("DELETE FROM history_ocr_frames WHERE history_entry_id=?1 AND id=?2")
+            .map_err(|e| e.to_string())?;
+        for frame_id in duplicates {
+            removed_count += delete
+                .execute(params![id, frame_id])
+                .map_err(|e| e.to_string())? as u64;
+        }
+        tx.execute("UPDATE history_ocr SET result_revision=?2 WHERE history_entry_id=?1 AND result_revision=?3",
+            params![id, uuid::Uuid::new_v4().to_string(), revision]).map_err(|e| e.to_string())?;
+    }
+    let content =
+        read_page(&tx, id, 100, 0, "", None)?.ok_or("The OCR result is no longer available.")?;
+    tx.commit()
+        .map_err(|e| format!("OCR duplicate removal could not be committed: {e}"))?;
+    Ok(OcrDuplicateRemoval {
+        removed_count,
+        content,
+    })
 }
 
 pub(crate) fn delete_frame(

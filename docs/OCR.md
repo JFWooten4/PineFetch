@@ -233,6 +233,74 @@ Completed results survive restart and interrupted native jobs retain the existin
 orphan recovery behavior. Progress is live in memory rather than restored after
 restart. Internal errors are logged; the UI shows concise recovery instructions.
 
+## Remove All Duplicates
+
+The OCR toolbar's **Remove All Duplicates** action scans **all saved frame rows
+for the selected History entry**, including rows beyond the 100-result page and
+outside the current search. A read-only preview counts redundant frames and
+returns the result revision. A confirmation dialog shows that count; Cancel and
+Escape leave the result untouched. No matches produces **No duplicate OCR frames
+found.** A successful change reloads the active search, updates the selection and
+video preview, and reports the removed frame count. Copy All Text and search use
+the remaining database rows. Buttons are disabled during analysis and cleanup;
+the dialog uses the existing keyboard, screenreader and focus conventions.
+
+Comparison uses only the complete `history_ocr_frames.full_text`. Unicode
+whitespace, including line breaks, is split into tokens for comparison: leading
+and trailing whitespace is ignored and intervening whitespace is equivalent to
+one space. Case, punctuation, token boundaries and every other character remain
+significant. For example, `Hello\nWorld` equals `Hello World`, but `hello World`,
+`Hello World!` and `Hello World\nNew information` are different. Boxes,
+confidence and individual block structure do not affect equality. Surviving
+`full_text` and `blocks_json` are never rewritten, including their whitespace.
+There is no partial block removal, fuzzy matching, semantic matching or LLM.
+
+One sequential pass follows `timestamp_ms, id`, compares each frame's text with
+the last kept text, and tracks continuity through **every visited sample**,
+including duplicates. This collapses hundreds of consecutive equal frames to
+the first frame of the run. Continuity requires:
+
+- For native frames, both sample keys are known and increase by exactly one,
+  with a strictly positive timestamp gap of at most **1,500 ms** (1.5 times the
+  existing sampling interval). A missing key therefore breaks the run, including
+  samples omitted by OCR because they contain no accepted text.
+- For legacy frames with both keys unknown, the strictly positive gap must be
+  at most **1,000 ms** (one existing sampling interval). This conservative
+  fallback cannot detect unrecorded empty samples when sample identity is lost.
+- A transition between known and unknown keys, repeated or decreasing keys,
+  equal timestamps, larger time gaps or an explicitly stored empty/whitespace
+  text breaks the run. A later recurrence is kept as a new occurrence.
+
+The time limits intentionally preserve some redundant frames when real sample
+spacing is unusually large. The action cannot recover missing sample identity,
+detect brief changes between samples, or recognize equivalent layouts/text with
+actual character differences. It does not change OCR parameters or sampling.
+Unstructured legacy text without frame rows is left untouched.
+
+`preview_history_ocr_duplicates` returns `duplicate_count` and `result_revision`
+from one SQLite read snapshot. `remove_history_ocr_duplicates` requires that
+revision, rechecks it under the existing immediate writer transaction, scans all
+rows again and deletes only redundant `history_ocr_frames` rows. The response
+contains `removed_count` and updated OCR metadata plus the first result page.
+A stale revision or running analysis rejects the action. Analysis starts and
+result publication use the same database serialization, including across app
+instances. Any SQLite error rolls back all frame deletions and the revision.
+The revision changes **once** for a successful nonempty cleanup and stays the
+same for zero duplicates or failure. All original analysis/source/engine/settings
+metadata and creation time are retained. A second cleanup removes nothing.
+Neither command reads or modifies the original video, starts Vision or reruns
+analysis; only a requested video preview uses the existing preview path.
+The scan borrows row text and compares whitespace iterators, retaining one run's
+text and duplicate IDs rather than copying full frame/block payloads.
+
+Regression tests cover 7,201 stored frames, exact comparison and boundaries,
+missing/empty/legacy samples, full export and search, stale revisions, a running
+analysis, partial delete and revision-write rollback, revision write count and
+repeat execution. Chromium and WebKit checks cover count confirmation with a
+filtered empty page, cancel/keyboard/focus behavior, mutation loading controls,
+errors/stale results, selection replacement/preservation and late image/preview
+responses.
+
 ## Build and checks
 
 On macOS Cargo's `build.rs` invokes `scripts/prepare-ocr-runtime.sh` before Tauri

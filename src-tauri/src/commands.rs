@@ -297,6 +297,31 @@ pub(crate) fn delete_history_ocr_frame_text(
 }
 
 #[tauri::command]
+pub(crate) async fn preview_history_ocr_duplicates(
+    app: AppHandle,
+    id: String,
+) -> Result<crate::models::OcrDuplicatePreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::ocr_store::preview_duplicates(&app.state::<AppState>().db, &id)
+    })
+    .await
+    .map_err(|e| format!("OCR duplicate preview failed: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn remove_history_ocr_duplicates(
+    app: AppHandle,
+    id: String,
+    result_revision: String,
+) -> Result<crate::models::OcrDuplicateRemoval, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::ocr_store::remove_duplicates(&app.state::<AppState>().db, &id, &result_revision)
+    })
+    .await
+    .map_err(|e| format!("OCR duplicate removal failed: {e}"))?
+}
+
+#[tauri::command]
 pub(crate) fn cancel_history_ocr(
     state: State<AppState>,
     id: String,
