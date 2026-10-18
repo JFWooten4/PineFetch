@@ -1,6 +1,6 @@
 <img src="src/images/logo.png" alt="PineFetch logo" width="96" height="96" />
 
-# PineFetch
+# PineFetch 🍍
 
 [![Dependabot Updates](https://github.com/oliverjessner/PineFetch/actions/workflows/dependabot/dependabot-updates/badge.svg)](https://github.com/oliverjessner/PineFetch/actions/workflows/dependabot/dependabot-updates) [![CI](https://github.com/oliverjessner/PineFetch/actions/workflows/quality.yml/badge.svg)](https://github.com/oliverjessner/PineFetch/actions/workflows/quality.yml)
 
