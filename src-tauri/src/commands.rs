@@ -248,6 +248,18 @@ pub(crate) fn get_history_social_insights(
 }
 
 #[tauri::command]
+pub(crate) async fn get_history_keywords(
+    app: AppHandle,
+    id: String,
+) -> Result<crate::keywords::HistoryKeywords, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::keywords::mine(&app.state::<AppState>().db, &id)
+    })
+    .await
+    .map_err(|e| format!("Keyword mining failed: {e}"))?
+}
+
+#[tauri::command]
 pub(crate) async fn load_history_social_insights(
     app: AppHandle,
     id: String,

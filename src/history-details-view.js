@@ -2,6 +2,7 @@ import { formatHistorySource, formatLocalDateTime, formatUploadDate } from './fo
 import { initTabs, toast } from './vendor/oj/index.js';
 import { createHistoryOcrView } from './history-ocr-view.js';
 import { createHistorySocialInsightsView } from './history-social-insights-view.js';
+import { createHistoryKeywordsView } from './history-keywords-view.js';
 
 export const createHistoryDetailsView = ({
     els,
@@ -29,6 +30,7 @@ export const createHistoryDetailsView = ({
     };
     const ocrView = createHistoryOcrView({ els, api, appendLog, jobs });
     const socialView = createHistorySocialInsightsView({ els, api, appendLog });
+    const keywordsView = createHistoryKeywordsView({ els, api, appendLog });
 
     const formatDateTime = timestamp => {
         const date = new Date(Number(timestamp));
@@ -303,6 +305,7 @@ export const createHistoryDetailsView = ({
         els.historyOverviewTab.click();
         ocrView.reset(entryId);
         socialView.reset(entryId);
+        keywordsView.reset(entryId);
         navigateToDetails(entryId);
         els.historyDetailsTitle.textContent = 'Video Details';
         els.historyDetailsSubtitle.textContent = '';
@@ -370,6 +373,7 @@ export const createHistoryDetailsView = ({
     const bindEvents = () => {
         ocrView.bindEvents();
         socialView.bindEvents();
+        keywordsView.bindEvents();
         const cleanupTabs = initTabs(els.historyDetailsContent);
         window.addEventListener('pagehide', cleanupTabs, { once: true });
 
@@ -496,6 +500,7 @@ export const createHistoryDetailsView = ({
             if (event.detail.tab === els.historyOcrTab) void ocrView.load();
             else ocrView.deactivate();
             if (event.detail.tab === els.historySocialTab) void socialView.load();
+            if (event.detail.tab === els.historyKeywordsTab) void keywordsView.load();
         });
         els.historyCaptionTrackSelect.addEventListener('change', () => void loadSelectedCaption());
         els.historyTranscriptCopyBtn.addEventListener(
@@ -521,6 +526,7 @@ export const createHistoryDetailsView = ({
             state.detailsRequestId += 1;
             ocrView.deactivate();
             socialView.reset(null);
+            keywordsView.reset(null);
         },
     });
 };

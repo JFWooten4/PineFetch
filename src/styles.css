@@ -1186,3 +1186,27 @@ body {
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+.pinefetch-keyword-filters {
+    align-items: end;
+    margin-block: var(--oj-space-4);
+}
+.pinefetch-keywords-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+}
+.pinefetch-keywords-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.pinefetch-keywords-table :is(th, td) {
+    padding: var(--oj-space-3);
+    border-block-end: 1px solid var(--oj-border);
+}
+.pinefetch-keywords-table th:first-child {
+    text-align: start;
+    overflow-wrap: anywhere;
+}
+.pinefetch-keywords-table thead {
+    background: var(--oj-surface);
+}

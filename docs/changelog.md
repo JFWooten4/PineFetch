@@ -1,5 +1,8 @@
 # 2.4.0
 
+- Added a Keywords tab with local word mining across saved transcripts, all OCR frames and captions, per-source counts, search and source filters. Only keywords with at least two total occurrences are included; German and English articles are excluded regardless of letter case.
+- Added reproducible offline screenshots for Social Insights and Keywords.
+
 - Added a Social Insights tab: manually load public video metrics with Fetchary and save snapshots locally in SQLite.
 - Fixed OCR source selection for transcriptions: use the retained video, require a supported video file and reject TXT/ANSI text animations in analysis and previews.
 - Added “Remove All Duplicates” to OCR results, with a count preview, confirmation and atomic removal of consecutive identical frame texts.

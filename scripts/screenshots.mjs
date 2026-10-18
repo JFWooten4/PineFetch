@@ -49,6 +49,15 @@ assert(
 );
 ocr.frame = `data:image/jpeg;base64,${(await readFile(join(fixtureDirectory, ocr.frame))).toString('base64')}`;
 
+const social = JSON.parse(await readFile(join(fixtureDirectory, 'social_insights.json'), 'utf8'));
+const keywords = JSON.parse(await readFile(join(fixtureDirectory, 'keywords.json'), 'utf8'));
+assert.equal(social.url, ocr.url);
+assert.equal(keywords.url, ocr.url);
+assert.deepEqual(
+    keywords.ocr,
+    ocr.frames.map(frame => frame.full_text)
+);
+
 await mkdir(outputDirectory, { recursive: true });
 // Refuse a redirected output directory; unlinking images must stay in this checkout.
 assert.equal(
@@ -87,7 +96,7 @@ try {
         }
         return route.abort('blockedbyclient');
     });
-    await context.addInitScript(installScreenshotBridge, { videos, version, ocr });
+    await context.addInitScript(installScreenshotBridge, { videos, version, ocr, social, keywords });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -187,6 +196,22 @@ try {
     assert.equal(await page.locator('#historyOcrFrame').getAttribute('src'), ocr.frame);
     assert.equal(await page.locator('#historyOcrCopyBtn').isEnabled(), true);
     await capture('ocr.webp');
+
+    await page.locator('#historySocialTab').click();
+    await page.waitForFunction(() => globalThis.document.querySelectorAll('.pinefetch-social-metric').length === 9);
+    assert.equal(await page.locator('#historySocialLoadBtn').textContent(), 'Refresh Social Insights');
+    await capture('social_insights.webp');
+
+    await page.locator('#historyKeywordsTab').click();
+    await page.waitForFunction(
+        count => globalThis.document.querySelectorAll('#historyKeywordsRows tr').length === count,
+        keywords.result.terms.length
+    );
+    assert.deepEqual(
+        await page.locator('#historyKeywordsRows th').allTextContents(),
+        keywords.result.terms.map(term => term.term)
+    );
+    await capture('keywords.webp');
     await page.locator('#historyDetailsBackBtn').click();
 
     await page.locator('#viewLinkDumpBtn').click();

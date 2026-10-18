@@ -19,7 +19,11 @@ const videos = await Promise.all(
     }))
 );
 
-const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
+const keywordFixture = JSON.parse(
+    await readFile(new URL('./fixtures/screenshots/keywords.json', import.meta.url), 'utf8')
+).result;
+
+const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) => {
     const invoke = globalThis.__TAURI__.core.invoke;
     const listen = globalThis.__TAURI__.event.listen;
     const listeners = new Map();
@@ -36,6 +40,10 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
         copied: '',
         ocrRecords: {},
         socialRecords: {},
+        keywordRecords: { 'history-1': keywordFixture },
+        holdKeywords: false,
+        releaseKeywords: null,
+        failKeywords: false,
         socialFetches: 0,
         holdSocial: false,
         releaseSocial: null,
@@ -190,6 +198,23 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
                 has_more: offset + (request.limit || 100) < filtered.length,
             };
         };
+        if (command === 'get_history_keywords') {
+            const result = structuredClone({
+                history_entry_id: args.id,
+                ...(ui.keywordRecords[args.id] || {
+                    sources: { transcript: false, ocr_frames: 0, ocr_legacy: false, captions: 0 },
+                    terms: [],
+                }),
+            });
+            if (ui.failKeywords) throw new Error('Fixture SQLite read failed');
+            if (ui.holdKeywords) {
+                ui.holdKeywords = false;
+                return new Promise(resolve => {
+                    ui.releaseKeywords = () => resolve(result);
+                });
+            }
+            return result;
+        }
         if (command === 'get_history_social_insights') return structuredClone(ui.socialRecords[args.id] || null);
         if (command === 'load_history_social_insights') {
             ui.socialFetches++;
@@ -417,7 +442,7 @@ try {
                 return route.abort('blockedbyclient');
             });
             await context.addInitScript({
-                content: `(${installScreenshotBridge.toString()})(${JSON.stringify({ videos, version })}); (${installUiResponses.toString()})(${JSON.stringify({ fallbackFrame: videos[0].thumbnail, playlistVideos: videos })});`,
+                content: `(${installScreenshotBridge.toString()})(${JSON.stringify({ videos, version })}); (${installUiResponses.toString()})(${JSON.stringify({ fallbackFrame: videos[0].thumbnail, playlistVideos: videos, keywordFixture })});`,
             });
             const page = await context.newPage();
             const errors = [];
@@ -2200,6 +2225,115 @@ try {
             });
             await closeDetails();
 
+            // Keywords use saved sources, filter all terms and ignore replies for another video.
+            await openOcr('history-1');
+            const socialFetchesBeforeKeywords = await page.evaluate(() => globalThis.__pinefetchUi.socialFetches);
+            await page.locator('#historySocialTab').focus();
+            await page.keyboard.press('ArrowRight');
+            assert.equal(await page.locator('#historyKeywordsTab').getAttribute('aria-selected'), 'true');
+            const keywordRows = page.locator('#historyKeywordsRows tr');
+            const keywordSearch = page.locator('#historyKeywordsSearch');
+            const keywordSource = page.locator('#historyKeywordsSource');
+            await page.waitForFunction(
+                () => globalThis.document.querySelectorAll('#historyKeywordsRows tr').length === 8
+            );
+            assert.deepEqual(await keywordRows.first().locator('th,td').allTextContents(), [
+                'Nintendo',
+                '3',
+                '1',
+                '2',
+                '6',
+            ]);
+            assert.match(
+                await page.locator('#historyKeywordsMeta').textContent(),
+                /Transcript available.*1 OCR frame.*1 saved caption/
+            );
+            await keywordSource.selectOption('shared');
+            assert.equal(await keywordRows.count(), 4);
+            await keywordSource.selectOption('ocr');
+            assert.equal(await keywordRows.count(), 4);
+            await keywordSource.selectOption('captions');
+            assert.equal(await keywordRows.count(), 8);
+            await keywordSource.selectOption('transcript');
+            assert.equal(await keywordRows.count(), 8);
+            await keywordSearch.fill('nInTeNdO');
+            assert.equal(await keywordRows.count(), 1);
+            await keywordSearch.fill('missing keyword');
+            assert.match(await page.locator('#historyKeywordsEmpty').textContent(), /No keywords match/);
+            assert(await page.locator('#historyKeywordsTable').isHidden());
+            await keywordSearch.fill('');
+            await keywordSource.selectOption('all');
+            await page.setViewportSize({ width: 600, height: 960 });
+            assert(await page.locator('#historyKeywordsPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
+            await page.setViewportSize({ width: 1400, height: 960 });
+            await page.evaluate(() => {
+                const ui = globalThis.__pinefetchUi;
+                ui.keywordRecords['history-1'].terms.push(
+                    ...Array.from({ length: 250 }, (_, i) => ({
+                        term: `Term${i}`,
+                        transcript: 2,
+                        ocr: 0,
+                        captions: 0,
+                        total: 2,
+                        sources: 1,
+                    }))
+                );
+                ui.keywordRecords['history-1'].terms.push({
+                    term: '<img src=x onerror=alert(1)>',
+                    transcript: 2,
+                    ocr: 0,
+                    captions: 0,
+                    total: 2,
+                    sources: 1,
+                });
+                ui.holdKeywords = true;
+            });
+            await page.locator('#historyKeywordsRefreshBtn').click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseKeywords));
+            assert(await keywordSearch.isDisabled());
+            assert(await keywordSource.isDisabled());
+            assert(await page.locator('#historyKeywordsRefreshBtn').isDisabled());
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseKeywords());
+            await page.waitForFunction(
+                () => globalThis.document.querySelectorAll('#historyKeywordsRows tr').length === 200
+            );
+            await page.locator('#historyKeywordsLoadMoreBtn').click();
+            assert.equal(await keywordRows.count(), 259);
+            assert.equal(await page.locator('#historyKeywordsRows img').count(), 0);
+            await keywordSearch.fill('term249');
+            assert.equal(await keywordRows.count(), 1);
+            await keywordSearch.fill('');
+            assert.equal(await keywordRows.count(), 200);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failKeywords = true;
+            });
+            await page.locator('#historyKeywordsRefreshBtn').click();
+            await page.waitForFunction(() =>
+                globalThis.document
+                    .querySelector('#historyKeywordsStatus')
+                    .textContent.includes('Previous results are still shown')
+            );
+            assert.equal(await keywordRows.count(), 200);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failKeywords = false;
+                globalThis.__pinefetchUi.holdKeywords = true;
+                globalThis.__pinefetchUi.releaseKeywords = null;
+            });
+            await page.locator('#historyKeywordsRefreshBtn').click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseKeywords));
+            await closeDetails();
+            await openOcr('history-2');
+            await page.locator('#historyKeywordsTab').click();
+            await page.locator('#historyKeywordsEmpty').waitFor();
+            assert.match(await page.locator('#historyKeywordsEmpty').textContent(), /No saved text is available/);
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseKeywords());
+            assert.equal(await keywordRows.count(), 0);
+            assert.equal(
+                await page.evaluate(() => globalThis.__pinefetchUi.socialFetches),
+                socialFetchesBeforeKeywords
+            );
+            await closeDetails();
+
             // Confirmation defaults to Cancel; cancellation never invokes deletion.
             await page.locator('#clearHistoryBtn').click();
             const confirmation = page.locator('dialog.oj-dialog[open]');
@@ -2544,7 +2678,7 @@ try {
             assert(loadedFonts.some(url => url.includes('fa-solid')));
             assert.deepEqual(errors, []);
             console.log(
-                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, playlist auto-import/retry/deduplication/clipboard, history filters/creator/reset, transcription model/save rollback, menus, tabs, full-container details, OCR frame grouping/native pagination/search/full export/confirmed deletion/late replies, background navigation, preserved History state, confirmations and switches passed.`
+                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, playlist auto-import/retry/deduplication/clipboard, history filters/creator/reset, transcription model/save rollback, menus, tabs, full-container details, local keyword counts/filtering/pagination/late replies, OCR frame grouping/native pagination/search/full export/confirmed deletion/late replies, background navigation, preserved History state, confirmations and switches passed.`
             );
         } finally {
             await browser.close();

@@ -27,6 +27,7 @@ No account. No cloud. Your files stay on your machine.
 - Import lists of links from TXT files
 - Keep a local download history
 - Inspect stored metadata, transcripts and captions from History
+- Mine keywords locally across saved transcripts, OCR and captions ([details](docs/KEYWORDS.md))
 - Load public Social Insights on demand and keep snapshots in SQLite ([details](docs/SOCIAL_INSIGHTS.md))
 - Control PineFetch from the command line
 - Send links to PineFetch through its local Link Dump API
@@ -78,6 +79,14 @@ Open a History entry to inspect its metadata, transcript and saved caption track
 ![PineFetch History Details screen](src/images/mockups/more_data.webp)
 
 ![PineFetch OCR screen](src/images/mockups/ocr.webp)
+
+**Social Insights** loads public video metrics when you click its load or refresh button and saves the snapshot locally.
+
+![PineFetch Social Insights screen](src/images/mockups/social_insights.webp)
+
+**Keywords** compares word occurrences across the saved transcript, all OCR frames and captions, including only words found at least twice in total. Search terms, filter by source or show words present in all three. Counts update when you reopen the tab or select **Refresh Keywords**.
+
+![PineFetch Keywords screen](src/images/mockups/keywords.webp)
 
 ## CLI
 

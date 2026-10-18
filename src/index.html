@@ -674,6 +674,16 @@
                                 >
                                     Social Insights
                                 </button>
+                                <button
+                                    id="historyKeywordsTab"
+                                    class="oj-tab"
+                                    type="button"
+                                    role="tab"
+                                    aria-selected="false"
+                                    aria-controls="historyKeywordsPanel"
+                                >
+                                    Keywords
+                                </button>
                             </div>
 
                             <section
@@ -697,6 +707,85 @@
                                     <p id="historySocialStatus" class="oj-status" role="status" aria-live="polite"></p>
                                     <p id="historySocialMeta" class="oj-helper"></p>
                                     <div id="historySocialMetrics" class="pinefetch-social-grid"></div>
+                                </div>
+                            </section>
+
+                            <section
+                                id="historyKeywordsPanel"
+                                class="oj-tab-panel pinefetch-history-details-panel"
+                                role="tabpanel"
+                                aria-labelledby="historyKeywordsTab"
+                                hidden
+                            >
+                                <div class="oj-toolbar">
+                                    <h3 class="oj-heading-3 oj-grow">Keyword Mining</h3>
+                                    <button
+                                        id="historyKeywordsRefreshBtn"
+                                        class="oj-button oj-button-secondary"
+                                        type="button"
+                                    >
+                                        Refresh Keywords
+                                    </button>
+                                </div>
+                                <p class="oj-helper">
+                                    Words found at least twice across the saved transcript, OCR and captions. Common
+                                    German/English words, numbers and timestamps are excluded.
+                                </p>
+                                <div class="oj-cluster pinefetch-keyword-filters">
+                                    <label class="oj-field oj-grow" for="historyKeywordsSearch">
+                                        <span class="oj-label">Search keywords</span>
+                                        <input
+                                            id="historyKeywordsSearch"
+                                            class="oj-input"
+                                            type="search"
+                                            placeholder="Search all keywords"
+                                        />
+                                    </label>
+                                    <label class="oj-field" for="historyKeywordsSource">
+                                        <span class="oj-label">Sources</span>
+                                        <select id="historyKeywordsSource" class="oj-select">
+                                            <option value="all">All keywords</option>
+                                            <option value="shared">In all three sources</option>
+                                            <option value="transcript">In transcript</option>
+                                            <option value="ocr">In OCR</option>
+                                            <option value="captions">In captions</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <p id="historyKeywordsMeta" class="oj-helper"></p>
+                                <div id="historyKeywordsResults">
+                                    <p
+                                        id="historyKeywordsStatus"
+                                        class="oj-status"
+                                        role="status"
+                                        aria-live="polite"
+                                    ></p>
+                                    <p id="historyKeywordsEmpty" class="oj-helper" hidden></p>
+                                    <div class="pinefetch-keywords-table-wrap">
+                                        <table id="historyKeywordsTable" class="pinefetch-keywords-table" hidden>
+                                            <caption class="oj-sr-only">
+                                                Keyword occurrences in each saved text source
+                                            </caption>
+                                            <thead>
+                                                <tr>
+                                                    <th scope="col">Keyword</th>
+                                                    <th scope="col" class="oj-numeric">Transcript</th>
+                                                    <th scope="col" class="oj-numeric">OCR</th>
+                                                    <th scope="col" class="oj-numeric">Captions</th>
+                                                    <th scope="col" class="oj-numeric">Total</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="historyKeywordsRows"></tbody>
+                                        </table>
+                                    </div>
+                                    <button
+                                        id="historyKeywordsLoadMoreBtn"
+                                        class="oj-button oj-button-ghost"
+                                        type="button"
+                                        hidden
+                                    >
+                                        Load more keywords
+                                    </button>
                                 </div>
                             </section>
 

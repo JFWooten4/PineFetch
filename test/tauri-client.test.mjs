@@ -15,6 +15,7 @@ const commands = {
     getHistory: 'get_history',
     getHistoryCaption: 'get_history_caption',
     getHistoryDetails: 'get_history_details',
+    getHistoryKeywords: 'get_history_keywords',
     getHistorySocialInsights: 'get_history_social_insights',
     loadHistorySocialInsights: 'load_history_social_insights',
     getHistoryOcr: 'get_history_ocr',

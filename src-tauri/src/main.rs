@@ -29,6 +29,7 @@ mod history_rules;
 mod http_failure_tests;
 #[cfg(test)]
 mod integrity_tests;
+mod keywords;
 mod link_dump_store;
 mod media_tools;
 mod metadata;
@@ -152,6 +153,7 @@ fn main() {
             commands::get_history,
             commands::get_history_stats,
             commands::get_history_details,
+            commands::get_history_keywords,
             commands::get_history_social_insights,
             commands::load_history_social_insights,
             commands::get_history_transcript,

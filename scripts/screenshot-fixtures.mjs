@@ -1,6 +1,6 @@
 // This bridge exists only in the isolated screenshot browser, never in the app.
 // Titles and thumbnails are cached YouTube oEmbed data; all other values are demos.
-export const installScreenshotBridge = ({ videos, version, ocr = null }) => {
+export const installScreenshotBridge = ({ videos, version, ocr = null, social = null, keywords = null }) => {
     const listeners = new Map();
     const queue = [];
     let ready = false;
@@ -138,6 +138,20 @@ export const installScreenshotBridge = ({ videos, version, ocr = null }) => {
                             has_more: offset + limit < frames.length,
                         });
                     }
+                    case 'get_history_social_insights':
+                        return history.find(entry => entry.id === args.id)?.url === social?.url
+                            ? structuredClone({ ...social.snapshot, history_entry_id: args.id })
+                            : null;
+                    case 'get_history_keywords':
+                        return structuredClone({
+                            history_entry_id: args.id,
+                            ...(history.find(entry => entry.id === args.id)?.url === keywords?.url
+                                ? keywords.result
+                                : {
+                                      sources: { transcript: false, ocr_frames: 0, ocr_legacy: false, captions: 0 },
+                                      terms: [],
+                                  }),
+                        });
                     case 'get_history_ocr_progress':
                         return null;
                     case 'get_history_ocr_frame':

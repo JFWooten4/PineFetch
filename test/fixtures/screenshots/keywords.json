@@ -1,0 +1,81 @@
+{
+    "url": "https://www.youtube.com/watch?v=4mwxAcGQjnI",
+    "description": "Synthetic text and expected local keyword counts for offline screenshots and tests.",
+    "transcript": "Nintendo DSi: Pokémon SoulSilver auf dem Handheld. Nintendo DSi mit Touchscreen, Display und Akku. Pokémon SoulSilver: Spiel und Konsole. Nintendo DSi.",
+    "ocr": ["NINTENDO\nDSi 2\nPokémon\nSOULSILVER"],
+    "captions": ["Nintendo DSi: Pokémon SoulSilver. Handheld mit Touchscreen und Display. Pokémon Spiel von Nintendo."],
+    "result": {
+        "sources": {
+            "transcript": true,
+            "ocr_frames": 1,
+            "ocr_legacy": false,
+            "captions": 1
+        },
+        "terms": [
+            {
+                "term": "Nintendo",
+                "transcript": 3,
+                "ocr": 1,
+                "captions": 2,
+                "total": 6,
+                "sources": 3
+            },
+            {
+                "term": "DSi",
+                "transcript": 3,
+                "ocr": 1,
+                "captions": 1,
+                "total": 5,
+                "sources": 3
+            },
+            {
+                "term": "Pokémon",
+                "transcript": 2,
+                "ocr": 1,
+                "captions": 2,
+                "total": 5,
+                "sources": 3
+            },
+            {
+                "term": "SoulSilver",
+                "transcript": 2,
+                "ocr": 1,
+                "captions": 1,
+                "total": 4,
+                "sources": 3
+            },
+            {
+                "term": "Display",
+                "transcript": 1,
+                "ocr": 0,
+                "captions": 1,
+                "total": 2,
+                "sources": 2
+            },
+            {
+                "term": "Handheld",
+                "transcript": 1,
+                "ocr": 0,
+                "captions": 1,
+                "total": 2,
+                "sources": 2
+            },
+            {
+                "term": "Spiel",
+                "transcript": 1,
+                "ocr": 0,
+                "captions": 1,
+                "total": 2,
+                "sources": 2
+            },
+            {
+                "term": "Touchscreen",
+                "transcript": 1,
+                "ocr": 0,
+                "captions": 1,
+                "total": 2,
+                "sources": 2
+            }
+        ]
+    }
+}

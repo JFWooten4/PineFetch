@@ -196,11 +196,20 @@ workflow files does not itself update GitHub repository settings.
 icons and license notices, then embeds them through Tauri's static frontend.
 `npm ci`, development, screenshots and release packaging also prepare these
 assets. The screenshot script renders the same local assets and waits for font
-loading before capturing each view; see [DEVELOPMENT.md](DEVELOPMENT.md).
+loading before capturing each view.
+
+`npm run screenshots` regenerates eight WebP images in `src/images/mockups/`:
+Download, History, Overview, OCR, Social Insights, Keywords, Browser Import and
+Settings. Network requests are blocked and native commands use an isolated
+in-memory bridge. Social metrics are synthetic demo values, not live counts.
+`test/fixtures/screenshots/keywords.json` contains the input texts and expected
+per-source counts; a Rust regression verifies those counts against the real miner.
+The OCR text in that fixture also matches the OCR screenshot fixture. These
+images demonstrate the production interface, not a live database or network run.
 
 `npm run test:ui` runs the design-system integration in Chromium and WebKit with
 an isolated Tauri fixture bridge and offline requests. It covers local fonts,
-icons and ESM loading, plus integrated keyboard navigation and dialogs. Prepare
+icons and ESM loading, plus integrated keyboard navigation, dialogs, and keyword filters/pagination/loading/error/late-response behavior. Prepare
 the browser engines with `npm exec playwright install chromium webkit` first.
 This explicit browser check is separate from the normal Node/Rust gates; it does
 not replace native Tauri or installed-bundle smoke tests.

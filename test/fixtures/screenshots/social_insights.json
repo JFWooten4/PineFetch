@@ -1,0 +1,45 @@
+{
+    "url": "https://www.youtube.com/watch?v=4mwxAcGQjnI",
+    "description": "Synthetic public metrics for offline screenshots; these are not live counts.",
+    "snapshot": {
+        "source_url": "https://www.youtube.com/watch?v=4mwxAcGQjnI",
+        "fetched_at": 1789903800000,
+        "fetchary_version": "2.0.4",
+        "data": {
+            "platform": "youtube",
+            "kind": "video",
+            "url": "https://www.youtube.com/watch?v=4mwxAcGQjnI",
+            "metrics": {
+                "views": 68421,
+                "likes": 2510,
+                "comments": 186,
+                "shares": null,
+                "saves": null,
+                "followers": null,
+                "following": null,
+                "posts": null,
+                "subscribers": null
+            },
+            "status": "available",
+            "sources": {
+                "views": {
+                    "approximate": false
+                },
+                "likes": {
+                    "approximate": false
+                },
+                "comments": {
+                    "approximate": false
+                }
+            },
+            "unavailable": {
+                "shares": "unsupported",
+                "saves": "unsupported",
+                "followers": "unsupported",
+                "following": "unsupported",
+                "posts": "unsupported",
+                "subscribers": "unsupported"
+            }
+        }
+    }
+}
