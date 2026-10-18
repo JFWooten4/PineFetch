@@ -1,5 +1,6 @@
 # 2.4.0
 
+- Fixed OCR source selection for transcriptions: use the retained video, require a supported video file and reject TXT/ANSI text animations in analysis and previews.
 - Added “Remove All Duplicates” to OCR results, with a count preview, confirmation and atomic removal of consecutive identical frame texts.
 
 # 2.3.3

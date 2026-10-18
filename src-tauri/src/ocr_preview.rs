@@ -121,7 +121,14 @@ impl OcrPreviewState {
         }
         let mut probe = Command::new(ffprobe);
         probe
-            .args(["-v", "error", "-show_streams", "-of", "json"])
+            .args([
+                "-v",
+                "error",
+                "-show_streams",
+                "-show_format",
+                "-of",
+                "json",
+            ])
             .arg(path);
         let probe = process::run_command_output(
             probe,

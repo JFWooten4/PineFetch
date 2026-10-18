@@ -42,6 +42,7 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
         holdFrame: false,
         releaseFrame: null,
         failNextFrame: false,
+        ocrSourceError: null,
         frameImages: {},
         failNextOcrDelete: false,
         duplicateIds: [],
@@ -277,6 +278,7 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
             return remove();
         }
         if (command === 'start_history_ocr') {
+            if (ui.ocrSourceError) throw new Error(ui.ocrSourceError);
             if (ui.ocrProgress[args.id]) return structuredClone(ui.ocrProgress[args.id]);
             if (Object.keys(ui.ocrProgress).length) throw new Error('An OCR analysis is already running.');
             const progress = {
@@ -2022,6 +2024,39 @@ try {
                 await page.evaluate(() => globalThis.__pinefetchUi.copied),
                 '[00:00:08] Unstructured legacy text'
             );
+            await closeDetails();
+
+            // A transcript without a retained video fails before a native job
+            // exists and preserves all previously saved OCR text.
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.ocrSourceError = 'No downloaded video is available for OCR.';
+            });
+            await openOcr('history-2');
+            await expectOcrStatus('OCR complete');
+            const savedOcrText = await page.locator('#historyOcrText').textContent();
+            await page.locator('#historyOcrStartBtn').click();
+            await page.waitForFunction(() =>
+                globalThis.document
+                    .querySelector('#historyOcrNotice')
+                    .textContent.includes('Keep video with transcript')
+            );
+            assert.equal(await page.locator('#historyOcrText').textContent(), savedOcrText);
+            assert.equal(await page.locator('#historyOcrProgress').isVisible(), false);
+            assert.deepEqual(await page.evaluate(() => Object.keys(globalThis.__pinefetchUi.ocrProgress)), []);
+            assert.equal(await page.locator('#historyOcrStartBtn').isEnabled(), true);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.ocrSourceError = 'OCR requires a supported video container.';
+            });
+            await page.locator('#historyOcrStartBtn').click();
+            await page.waitForFunction(() =>
+                globalThis.document
+                    .querySelector('#historyOcrNotice')
+                    .textContent.includes('Text, audio and image files cannot be analyzed')
+            );
+            assert.equal(await page.locator('#historyOcrText').textContent(), savedOcrText);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.ocrSourceError = null;
+            });
             await closeDetails();
 
             // Confirmation defaults to Cancel; cancellation never invokes deletion.

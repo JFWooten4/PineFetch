@@ -37,6 +37,7 @@ mod navigation;
 mod ocr;
 mod ocr_preview;
 mod ocr_rules;
+mod ocr_source;
 mod ocr_store;
 #[cfg(test)]
 mod ocr_tests;

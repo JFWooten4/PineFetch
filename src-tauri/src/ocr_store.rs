@@ -9,21 +9,26 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeMap;
 
 pub(crate) fn saved_path(db: &Database, id: &str) -> Result<String, String> {
-    let conn = db.lock().map_err(|_| "SQLite lock poisoned")?;
-    let path: Option<Option<String>> = conn
-        .query_row(
-            "SELECT output_path FROM history_entries WHERE id=?1",
+    let stored: Option<(Option<String>, bool)> = {
+        let conn = db.lock().map_err(|_| "SQLite lock poisoned")?;
+        conn.query_row(
+            "SELECT output_path, COALESCE(medium='transcript',0) OR
+             EXISTS(SELECT 1 FROM transcriptions WHERE history_entry_id=?1)
+             FROM history_entries WHERE id=?1",
             [id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
-        .map_err(|e| e.to_string())?;
-    path.ok_or("This history entry no longer exists.")?
+        .map_err(|e| e.to_string())?
+    };
+    let (path, is_transcript) = stored.ok_or("This history entry no longer exists.")?;
+    let path = path
         .filter(|p| !p.trim().is_empty())
-        .ok_or_else(|| {
-            "No saved video path is available for this entry. OCR will not guess another filename."
-                .into()
-        })
+        .ok_or(crate::ocr_source::NO_VIDEO)?;
+    crate::ocr_source::resolve(std::path::Path::new(&path), is_transcript)?
+        .into_os_string()
+        .into_string()
+        .map_err(|_| "The saved video path is not valid Unicode.".into())
 }
 
 pub(crate) fn begin(db: &Database, id: &str, attempt: &str) -> Result<(), String> {

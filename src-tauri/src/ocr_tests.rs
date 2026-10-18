@@ -257,12 +257,14 @@ fn integration_ocr_preview_matches_vfr_frames_with_a_nonzero_origin_and_detects_
         "{}",
         String::from_utf8_lossy(&made.stderr)
     );
+    let transcript = video.with_extension("txt");
+    fs::write(&transcript, "This text must never become a video frame.").unwrap();
     let db = db();
     db.lock()
         .unwrap()
         .execute(
-            "UPDATE history_entries SET output_path=?1 WHERE id='video'",
-            [video.to_str().unwrap()],
+            "UPDATE history_entries SET output_path=?1,medium='transcript' WHERE id='video'",
+            [transcript.to_str().unwrap()],
         )
         .unwrap();
     let mut saved = result("Text");
@@ -948,12 +950,12 @@ fn variable_frame_times_and_invalid_protocol_data_are_explicit() {
     invalid["observations"][0]["bounds"]["x"] = serde_json::json!(2);
     assert!(ocr_rules::validate_observations(&invalid, 4).is_err());
     assert!(ocr_rules::validate_observations(&serde_json::json!({"frame_id":4}), 4).is_err());
-    let probe = br#"{"streams":[{"index":0,"codec_type":"audio"},{"index":1,"codec_type":"video","width":200,"height":100,"disposition":{"attached_pic":1}},{"index":2,"codec_type":"video","width":200,"height":100}]}"#;
+    let probe = br#"{"format":{"format_name":"mov,mp4"},"streams":[{"index":0,"codec_type":"audio"},{"index":1,"codec_type":"video","width":200,"height":100,"disposition":{"attached_pic":1}},{"index":2,"codec_type":"video","width":200,"height":100}]}"#;
     assert_eq!(ocr_rules::video_stream_index(probe).unwrap(), 2);
-    assert!(
-        ocr_rules::video_stream_index(br#"{"streams":[{"index":0,"codec_type":"audio"}]}"#)
-            .is_err()
-    );
+    assert!(ocr_rules::video_stream_index(
+        br#"{"format":{"format_name":"mov,mp4"},"streams":[{"index":0,"codec_type":"audio"}]}"#
+    )
+    .is_err());
 }
 
 #[test]
@@ -1249,7 +1251,7 @@ fn tools(root: &TempRoot, helper_body: &str) -> OcrTools {
     )
     .unwrap();
     OcrTools { helper:script(root,"vision",helper_body),
-        ffprobe:script(root,"probe",r#"printf '%s\n' '{"format":{"duration":"3.5"},"streams":[{"index":0,"codec_type":"video","width":100,"height":100}]}'"#),
+        ffprobe:script(root,"probe",r#"printf '%s\n' '{"format":{"format_name":"mov,mp4","duration":"3.5"},"streams":[{"index":0,"codec_type":"video","width":100,"height":100}]}'"#),
         ffmpeg:script(root,"frames",&format!("printf '%s\\n' '[Parsed_showinfo_1 @ fixture] n: 0 pts: 1 pts_time:1.31 fmt:rgba' >&2\ncat '{}'",png.display())) }
 }
 #[cfg(unix)]
@@ -1396,7 +1398,7 @@ fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_
     audio.ffprobe = script(
         &root,
         "audio-probe",
-        r#"printf '%s\n' '{"streams":[{"index":0,"codec_type":"audio"}]}'"#,
+        r#"printf '%s\n' '{"format":{"format_name":"mov,mp4"},"streams":[{"index":0,"codec_type":"audio"}]}'"#,
     );
     assert!(ocr::analyze(&OcrState::default(), &path, &audio, |_| {})
         .unwrap_err()
@@ -1746,4 +1748,283 @@ fn duplicate_removal_rejects_running_analysis_stale_results_and_rolls_back_sqlit
             .contains("changed")
     );
     assert!(ocr_store::preview_duplicates(&db, "missing").is_err());
+}
+
+#[test]
+fn ocr_accepts_only_video_extensions_and_real_video_containers() {
+    use crate::ocr_source;
+    use std::path::Path;
+    for extension in ocr_source::VIDEO_EXTENSIONS {
+        assert!(ocr_source::has_video_extension(Path::new(&format!(
+            "clip.{extension}"
+        ))));
+        assert!(ocr_source::has_video_extension(Path::new(&format!(
+            "clip.{}",
+            extension.to_uppercase()
+        ))));
+    }
+    for name in [
+        "clip.txt",
+        "clip.TXT",
+        "clip.srt",
+        "clip.vtt",
+        "clip.json",
+        "clip.mp3",
+        "clip.m4a",
+        "clip.wav",
+        "clip.png",
+        "clip.jpg",
+        "clip.mp4.txt",
+        "clip",
+        "clip.part",
+    ] {
+        assert!(!ocr_source::has_video_extension(Path::new(name)), "{name}");
+        // Extension rejection even for a nonexistent path: never open the text.
+        assert!(ocr::validate_source(&Path::new("/nonexistent").join(name))
+            .unwrap_err()
+            .contains("supported video extension"));
+    }
+    let video = serde_json::json!({"index":0,"codec_type":"video","width":640,"height":400});
+    for format in [
+        "tty", "bin", "idf", "xbin", "image2", "png_pipe", "hls", "srt", "mp3", "unknown",
+    ] {
+        let probe = serde_json::json!({"format":{"format_name":format},"streams":[video.clone()]});
+        assert!(
+            ocr_rules::video_stream_index(&serde_json::to_vec(&probe).unwrap()).is_err(),
+            "{format}"
+        );
+    }
+    for format in [
+        "mov,mp4,m4a,3gp,3g2,mj2",
+        "matroska,webm",
+        "avi",
+        "asf",
+        "flv",
+        "mpeg",
+        "mpegts",
+        "mpegvideo",
+        "m4v",
+        "ogg",
+        "rm",
+        "nut",
+    ] {
+        let probe = serde_json::json!({"format":{"format_name":format},"streams":[video.clone()]});
+        assert_eq!(
+            ocr_rules::video_stream_index(&serde_json::to_vec(&probe).unwrap()).unwrap(),
+            0,
+            "{format}"
+        );
+    }
+    let cover_only = serde_json::json!({"format":{"format_name":"mov,mp4"},"streams":[{"index":0,"codec_type":"audio"},{"index":1,"codec_type":"video","width":100,"height":100,"disposition":{"attached_pic":1}}]});
+    assert!(ocr_rules::video_stream_index(&serde_json::to_vec(&cover_only).unwrap()).is_err());
+}
+
+#[test]
+fn integration_ocr_resolves_only_one_exact_retained_video_for_transcripts() {
+    let root = TempRoot::new("ocr-transcript-source");
+    let db = db();
+    assert!(ocr_store::saved_path(&db, "video")
+        .unwrap_err()
+        .contains("No downloaded video"));
+    assert!(ocr_store::saved_path(&db, "missing")
+        .unwrap_err()
+        .contains("no longer exists"));
+    let transcript = root.path("Grüße_timestamps.txt");
+    let video = transcript.with_extension("WeBM");
+    let set_output = |path: &std::path::Path, medium: Option<&str>| {
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE history_entries SET output_path=?1,medium=?2 WHERE id='video'",
+                rusqlite::params![path.to_str().unwrap(), medium],
+            )
+            .unwrap();
+    };
+    fs::write(&transcript, "Transcript must remain untouched.").unwrap();
+    set_output(&transcript, Some("transcript"));
+    for name in [
+        "Grüße_timestamps.m4a",
+        "Grüße_timestamps-extra.mp4",
+        "Grüße.mp4",
+        "unrelated.webm",
+    ] {
+        fs::write(root.path(name), b"unrelated").unwrap();
+    }
+    assert!(ocr_store::saved_path(&db, "video")
+        .unwrap_err()
+        .contains("No downloaded video"));
+    fs::write(&video, b"retained video").unwrap();
+    assert_eq!(
+        ocr_store::saved_path(&db, "video").unwrap(),
+        video.to_str().unwrap()
+    );
+    assert_eq!(
+        fs::read_to_string(&transcript).unwrap(),
+        "Transcript must remain untouched."
+    );
+    let other = transcript.with_extension("mp4");
+    fs::write(&other, b"another video").unwrap();
+    assert!(ocr_store::saved_path(&db, "video")
+        .unwrap_err()
+        .contains("Several downloaded videos"));
+    fs::remove_file(other).unwrap();
+    // The saved association still resolves if the TXT itself was removed.
+    fs::remove_file(&transcript).unwrap();
+    assert_eq!(
+        ocr_store::saved_path(&db, "video").unwrap(),
+        video.to_str().unwrap()
+    );
+    // Audio/other entries cannot turn text into an OCR source via siblings.
+    set_output(&transcript, Some("audio"));
+    assert!(ocr_store::saved_path(&db, "video")
+        .unwrap_err()
+        .contains("supported video extension"));
+    // Legacy rows can establish transcript identity through their stored text row.
+    set_output(&transcript, None);
+    db.lock().unwrap().execute("INSERT INTO transcriptions(history_entry_id,text,type,language) VALUES ('video','Saved transcript','text','en')", []).unwrap();
+    assert_eq!(
+        ocr_store::saved_path(&db, "video").unwrap(),
+        video.to_str().unwrap()
+    );
+    // Do not strip unique-output suffixes to guess an association.
+    set_output(&root.path("Grüße_timestamps__2.txt"), Some("transcript"));
+    assert!(ocr_store::saved_path(&db, "video")
+        .unwrap_err()
+        .contains("No downloaded video"));
+    for extension in ["mp4", "mov", "mkv", "webm", "AVI"] {
+        let direct = root.path(format!("download.{extension}"));
+        fs::write(&direct, b"video").unwrap();
+        set_output(&direct, Some("video"));
+        assert_eq!(
+            ocr_store::saved_path(&db, "video").unwrap(),
+            direct.to_str().unwrap()
+        );
+        fs::remove_file(&direct).unwrap();
+        assert!(ocr_store::saved_path(&db, "video")
+            .unwrap_err()
+            .contains("missing"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn integration_ocr_rejects_transcript_files_before_tools_and_text_containers_before_vision() {
+    let root = TempRoot::new("ocr-text-source");
+    let transcript = root.path("clip.txt");
+    fs::write(&transcript, "[00:00:00 → 00:00:15] Bloomberg Tech is live.").unwrap();
+    let helper_started = root.path("helper-started");
+    let decode_started = root.path("decode-started");
+    let probe_started = root.path("probe-started");
+    let tools = OcrTools {
+        helper: script(&root, "vision", &format!("touch '{}'\nexit 11", helper_started.display())),
+        ffmpeg: script(&root, "decode", &format!("touch '{}'\nexit 12", decode_started.display())),
+        ffprobe: script(&root, "probe", &format!("touch '{}'\nprintf '%s\\n' '{{\"format\":{{\"format_name\":\"tty\",\"duration\":\"10.64\"}},\"streams\":[{{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"ansi\",\"width\":640,\"height\":400}}]}}'", probe_started.display())),
+    };
+    assert!(
+        ocr::analyze(&OcrState::default(), &transcript, &tools, |_| {})
+            .unwrap_err()
+            .contains("supported video extension")
+    );
+    assert!(!probe_started.exists());
+    assert!(!helper_started.exists());
+    assert!(!decode_started.exists());
+    let renamed_text = transcript.with_extension("mp4");
+    fs::copy(&transcript, &renamed_text).unwrap();
+    assert!(
+        ocr::analyze(&OcrState::default(), &renamed_text, &tools, |_| {})
+            .unwrap_err()
+            .contains("supported video container")
+    );
+    assert!(probe_started.exists());
+    assert!(!helper_started.exists());
+    assert!(!decode_started.exists());
+    // Old incorrect results remain readable; previews cannot render the TXT or
+    // a renamed TXT even when its bytes match the old result's source hash.
+    let db = db();
+    db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE history_entries SET output_path=?1,medium='transcript' WHERE id='video'",
+            [transcript.to_str().unwrap()],
+        )
+        .unwrap();
+    let mut saved = result("Old OCR text");
+    saved.source_sha256 = crate::hashing::sha256_from_path(transcript.to_str())
+        .unwrap()
+        .unwrap();
+    ocr_store::begin(&db, "video", "old-result").unwrap();
+    ocr_store::finish(&db, "video", "old-result", &saved).unwrap();
+    let before = ocr_store::get(&db, "video").unwrap().unwrap();
+    let selected = selection(&before, 0, 3020);
+    let preview = crate::ocr_preview::OcrPreviewState::default();
+    assert!(preview
+        .frame(
+            &db,
+            &crate::process::ProcessState::default(),
+            "video",
+            &selected,
+            &tools.ffmpeg,
+            &tools.ffprobe
+        )
+        .unwrap_err()
+        .contains("supported video container"));
+    fs::remove_file(&renamed_text).unwrap();
+    assert!(preview
+        .frame(
+            &db,
+            &crate::process::ProcessState::default(),
+            "video",
+            &selected,
+            &tools.ffmpeg,
+            &tools.ffprobe
+        )
+        .unwrap_err()
+        .contains("No downloaded video"));
+    assert!(!decode_started.exists());
+    assert_eq!(
+        ocr_store::get(&db, "video")
+            .unwrap()
+            .unwrap()
+            .result_revision,
+        before.result_revision
+    );
+    assert_eq!(
+        ocr_store::export_text(&db, "video", None).unwrap(),
+        "[00:00:03.020]\nOld OCR text"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn integration_starting_ocr_without_a_downloaded_video_preserves_previous_attempt_and_result() {
+    let root = TempRoot::new("ocr-no-downloaded-video");
+    let db = Arc::new(db());
+    let transcript = root.path("only-transcript.txt");
+    fs::write(&transcript, "A transcript without a downloaded video.").unwrap();
+    db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE history_entries SET output_path=?1,medium='transcript' WHERE id='video'",
+            [transcript.to_str().unwrap()],
+        )
+        .unwrap();
+    ocr_store::begin(&db, "video", "old-result").unwrap();
+    ocr_store::finish(&db, "video", "old-result", &result("Saved previous text")).unwrap();
+    let before = ocr_store::get(&db, "video").unwrap().unwrap();
+    let state = Arc::new(OcrState::initialize(root.root(), &db).unwrap());
+    let error = ocr::start(
+        db.clone(),
+        state.clone(),
+        "video".into(),
+        tools(&root, "exit 99"),
+        |_| panic!("No OCR job may start for a transcript without a video"),
+    )
+    .unwrap_err();
+    assert!(error.contains("No downloaded video"), "{error}");
+    assert!(state.progress("video").unwrap().is_none());
+    let after = ocr_store::get(&db, "video").unwrap().unwrap();
+    assert_eq!(before.last_attempt_id, after.last_attempt_id);
+    assert_eq!(before.last_attempt_status, after.last_attempt_status);
+    assert_eq!(before.result_revision, after.result_revision);
+    assert_eq!(before.frames, after.frames);
 }

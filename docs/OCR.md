@@ -65,17 +65,41 @@ page. Deleting the last frame leaves a valid empty successful result. Edits surv
 restart and are disabled during analysis. A successful explicit **Run OCR Again**
 atomically replaces them with newly recognized frames.
 
-Only the entry's saved absolute `output_path` is eligible. FFprobe must identify
-a real video stream, excluding attached cover art. Missing files, audio,
-transcripts and missing/ambiguous paths produce English errors. No sibling
-filenames are guessed and no download is started. Stored OCR remains readable
-after the video disappears. The analyzed video's own SHA-256 is computed; the
-History hash is never reused.
+OCR requires an existing, readable local video file. Ordinary video entries use
+their saved absolute `output_path`. A transcript entry (identified by its stored
+medium or transcription record) points to TXT instead: OCR checks for exactly
+one video with the **same complete filename stem in the same directory**. This
+supports videos retained with **Keep video with transcript**, including names
+ending in `_timestamps`. The TXT is never opened or hashed for OCR. The video
+can still be used if its companion TXT was deleted. No match produces a clear
+instruction to download the video or enable that option and download again.
+Multiple video candidates are rejected. OCR never strips naming/collision
+suffixes, searches other folders or starts a download; renamed transcripts or
+ambiguous associations require the video's own History entry or a fresh download.
+The current setting does not prove whether a past download retained its video;
+the file must actually exist.
+
+Extensions are checked case-insensitively **before opening any source file**:
+`webm`, `mkv`, `mp4`, `mov`, `m4v`, `avi`, `wmv`, `asf`, `flv`, `f4v`, `mpg`,
+`mpeg`, `mpe`, `m1v`, `m2v`, `ts`, `mts`, `m2ts`, `vob`, `ogv`, `3gp`, `3g2`,
+`rm`, `rmvb` and `nut`. TXT, subtitle, audio and image paths are excluded.
+FFprobe must additionally identify a supported video container and a real video
+stream, excluding attached cover art. Extension alone is insufficient: renamed
+TXT files, FFmpeg's `tty`/ANSI text animations, image inputs and playlists are
+rejected. Vision starts only after this probe succeeds. Analysis and previews
+share the same source resolver and format checks.
+
+Stored OCR remains readable after a missing/rejected video. Rejected starts do
+not alter the existing attempt or saved results. Previously incorrect OCR from
+TXT remains saved until a successful explicit **Run OCR Again** replaces it using
+the retained video; its old source hash cannot be reused to preview that video.
+The analyzed video's own SHA-256 is computed; the History transcript hash is
+never reused.
 
 ## Recognition and sampling
 
 `ocr` orchestrates processes; `ocr_rules` owns frame-local reading order and validation;
-`ocr_store` owns short SQLite transactions. `native/vision-ocr.swift` uses
+`ocr_source` resolves and validates local video paths; `ocr_store` owns short SQLite transactions. `native/vision-ocr.swift` uses
 `VNRecognizeTextRequest`, `.accurate`, the full image and no minimum text-height
 cutoff. Language correction is **disabled**. Supported languages are queried
 for the actual request revision. The helper prefers `de-DE` and `en-US`, then

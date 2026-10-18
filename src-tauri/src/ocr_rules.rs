@@ -295,6 +295,36 @@ pub(crate) fn parse_frame_time(line: &str) -> Result<Option<(u64, u64)>, String>
 pub(crate) fn video_stream_index(bytes: &[u8]) -> Result<u64, String> {
     let probe: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|_| "Invalid video probe response.")?;
+    // FFmpeg can expose text (tty/ansi), still images and playlists as video.
+    // A video extension alone is insufficient, including for renamed TXT files.
+    let supported_container = probe
+        .pointer("/format/format_name")
+        .and_then(|v| v.as_str())
+        .is_some_and(|formats| {
+            formats.split(',').any(|format| {
+                matches!(
+                    format,
+                    "matroska"
+                        | "webm"
+                        | "mov"
+                        | "mp4"
+                        | "avi"
+                        | "asf"
+                        | "flv"
+                        | "live_flv"
+                        | "mpeg"
+                        | "mpegvideo"
+                        | "mpegts"
+                        | "m4v"
+                        | "ogg"
+                        | "rm"
+                        | "nut"
+                )
+            })
+        });
+    if !supported_container {
+        return Err("OCR requires a supported video container. Transcript, audio and image files cannot be used as videos.".into());
+    }
     probe.get("streams").and_then(|v| v.as_array()).into_iter().flatten()
         .find(|s| s.get("codec_type").and_then(|v| v.as_str()) == Some("video")
             && s.pointer("/disposition/attached_pic").and_then(|v| v.as_u64()).unwrap_or(0) == 0

@@ -8,6 +8,12 @@ export const ocrErrorMessage = error => {
     if (/macOS only/i.test(message)) return 'Apple Vision OCR is available on macOS only.';
     if (/already running|another PineFetch instance/i.test(message))
         return 'Another OCR analysis is active. Wait for it to finish or cancel it before starting this video.';
+    if (/Several downloaded videos match/i.test(message))
+        return "Several saved videos match this transcript. Open the video's own History entry or download it again.";
+    if (/No downloaded video|supported video extension/i.test(message))
+        return 'OCR requires a downloaded video. Enable “Keep video with transcript” and download it again, or download the video separately.';
+    if (/supported video container|no usable video track/i.test(message))
+        return 'This file does not contain a supported video. Text, audio and image files cannot be analyzed with OCR.';
     if (/FFmpeg|ffprobe|helper.*(missing|unavailable)/i.test(message))
         return 'The local OCR tools are unavailable. Check your installation and try again.';
     if (/missing|unreadable|saved video path|no longer exists/i.test(message))

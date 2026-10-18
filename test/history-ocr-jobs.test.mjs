@@ -65,6 +65,16 @@ test('OCR states and user errors preserve the existing backend contract without 
     assert.doesNotMatch(internal, /Traceback|private|RuntimeError/);
 });
 
+test('OCR source errors explain retained video requirements without exposing paths', () => {
+    for (const message of ['No downloaded video is available for OCR.', 'OCR requires a supported video extension.']) {
+        assert.match(ocrErrorMessage(message), /Keep video with transcript/);
+        assert.match(ocrErrorMessage(message), /download/i);
+    }
+    for (const message of ['OCR requires a supported video container.', 'The saved file has no usable video track.'])
+        assert.match(ocrErrorMessage(message), /Text, audio and image files cannot be analyzed/);
+    assert.match(ocrErrorMessage('Several downloaded videos match this transcript.'), /Several saved videos/);
+});
+
 test('queued start requests deduplicate and native acknowledgement adopts the original attempt', async () => {
     const { jobs, reply, starts } = fixture();
     const first = jobs.start('video-a');

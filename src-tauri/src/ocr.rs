@@ -325,17 +325,7 @@ fn check_cancel(state: &OcrState) -> Result<(), String> {
     }
 }
 
-pub(crate) fn validate_source(path: &Path) -> Result<(), String> {
-    if !path.is_absolute() {
-        return Err("The saved video path is not an unambiguous absolute path.".into());
-    }
-    let metadata = fs::metadata(path).map_err(|_| "The saved file is missing or unreadable.")?;
-    if !metadata.is_file() {
-        return Err("The saved path is not a readable video file.".into());
-    }
-    File::open(path).map_err(|_| "The saved file is unreadable.")?;
-    Ok(())
-}
+pub(crate) use crate::ocr_source::validate as validate_source;
 
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) struct Fingerprint {
@@ -629,18 +619,6 @@ pub(crate) fn analyze(
     if fingerprint(path)? != before {
         return Err("The saved video changed while it was being hashed.".into());
     }
-    let mut helper_command = Command::new(&tools.helper);
-    helper_command.stdin(Stdio::piped());
-    let (helper, output, errors, stdin) = ManagedChild::spawn(state, helper_command)?;
-    let diagnostics = diagnostic_reader(errors);
-    let responses = protocol_reader(output);
-    let ready = receive(state, &responses).map_err(|e| {
-        format!(
-            "{e} {}",
-            diagnostics.lock().map(|s| s.clone()).unwrap_or_default()
-        )
-    })?;
-    ocr_rules::validate_ready(&ready)?;
     let mut probe = Command::new(&tools.ffprobe);
     probe
         .args([
@@ -665,6 +643,18 @@ pub(crate) fn analyze(
     }
     let index = ocr_rules::video_stream_index(&probe.stdout)?;
     let duration_ms = ocr_rules::video_duration_ms(&probe.stdout, index);
+    let mut helper_command = Command::new(&tools.helper);
+    helper_command.stdin(Stdio::piped());
+    let (helper, output, errors, stdin) = ManagedChild::spawn(state, helper_command)?;
+    let diagnostics = diagnostic_reader(errors);
+    let responses = protocol_reader(output);
+    let ready = receive(state, &responses).map_err(|e| {
+        format!(
+            "{e} {}",
+            diagnostics.lock().map(|s| s.clone()).unwrap_or_default()
+        )
+    })?;
+    ocr_rules::validate_ready(&ready)?;
     progress(AnalysisProgress::Prepared { duration_ms });
     let workspace = Workspace::new()?;
     let frame_path = workspace.path.join("frame.png");
