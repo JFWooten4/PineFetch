@@ -240,6 +240,34 @@ pub(crate) fn get_history_ocr(
 }
 
 #[tauri::command]
+pub(crate) fn get_history_social_insights(
+    state: State<AppState>,
+    id: String,
+) -> Result<Option<crate::social_insights::SocialInsightsSnapshot>, String> {
+    crate::social_insights::get(&state.db, &id)
+}
+
+#[tauri::command]
+pub(crate) async fn load_history_social_insights(
+    app: AppHandle,
+    id: String,
+) -> Result<crate::social_insights::SocialInsightsSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let tools = crate::runtime::resolve_social_insights_tools(&app)?;
+        crate::social_insights::fetch(
+            &state.db,
+            &state.social_insights,
+            &state.processes,
+            &id,
+            &tools,
+        )
+    })
+    .await
+    .map_err(|e| format!("Social Insights request failed: {e}"))?
+}
+
+#[tauri::command]
 pub(crate) fn get_history_ocr_text(
     state: State<AppState>,
     id: String,

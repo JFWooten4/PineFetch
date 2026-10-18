@@ -27,6 +27,7 @@ No account. No cloud. Your files stay on your machine.
 - Import lists of links from TXT files
 - Keep a local download history
 - Inspect stored metadata, transcripts and captions from History
+- Load public Social Insights on demand and keep snapshots in SQLite ([details](docs/SOCIAL_INSIGHTS.md))
 - Control PineFetch from the command line
 - Send links to PineFetch through its local Link Dump API
 
@@ -107,7 +108,7 @@ Connections are protected with a locally generated secret.
 
 ## Build it yourself
 
-You'll need Node.js, Rust, Tauri and yt-dlp.
+You'll need Node.js, Rust, Tauri and yt-dlp. Social Insights bundles portable Node 26 and Fetchary during `npm run dev`/`npm run build:check`/app builds. The first preparation downloads the checksum-verified Node runtime and installs locked production dependencies; later runs reuse it.
 
 ```bash
 git clone https://github.com/oliverjessner/PineFetch.git

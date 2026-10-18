@@ -1,5 +1,6 @@
 # 2.4.0
 
+- Added a Social Insights tab: manually load public video metrics with Fetchary and save snapshots locally in SQLite.
 - Fixed OCR source selection for transcriptions: use the retained video, require a supported video file and reject TXT/ANSI text animations in analysis and previews.
 - Added “Remove All Duplicates” to OCR results, with a count preview, confirmation and atomic removal of consecutive identical frame texts.
 

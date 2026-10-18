@@ -553,7 +553,7 @@ fn repeated_frame_storage_hits_the_existing_limit_before_exceeding_it() {
 
 fn schema_three(path: &std::path::Path) -> Connection {
     let conn = database::open(path).unwrap();
-    conn.execute_batch("DROP TABLE history_ocr_frames;
+    conn.execute_batch("DROP TABLE IF EXISTS history_social_insights; DROP TABLE history_ocr_frames;
         ALTER TABLE history_ocr DROP COLUMN result_revision;
         ALTER TABLE history_ocr DROP COLUMN result_format;
         PRAGMA user_version=3;
@@ -1120,7 +1120,7 @@ fn integration_schema_two_upgrade_failure_rolls_back_and_retry_preserves_rows() 
     let root = TempRoot::new("ocr-migration");
     let path = root.path("state.sqlite");
     let conn = database::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE history_ocr_frames; DROP TABLE history_ocr; PRAGMA user_version=2;
+    conn.execute_batch("DROP TABLE IF EXISTS history_social_insights; DROP TABLE history_ocr_frames; DROP TABLE history_ocr; PRAGMA user_version=2;
         INSERT INTO history_entries (id,url,title,created_at) VALUES ('video','https://example.com','Grüße 🌲',123);").unwrap();
     let before: Vec<u8> = fs::read(&path).unwrap();
     drop(conn);
@@ -1153,7 +1153,7 @@ fn integration_schema_two_upgrade_failure_rolls_back_and_retry_preserves_rows() 
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        4
+        database::SCHEMA_VERSION
     );
     assert_eq!(
         conn.query_row(
@@ -1196,12 +1196,13 @@ fn integration_strict_ocr_layout_refuses_changed_constraints_and_future_versions
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch("DROP TABLE history_ocr").unwrap();
     conn.execute_batch(&original).unwrap();
-    conn.pragma_update(None, "user_version", 5).unwrap();
+    conn.pragma_update(None, "user_version", database::SCHEMA_VERSION + 1)
+        .unwrap();
     drop(conn);
     let bytes = fs::read(&path).unwrap();
     assert!(database::open(&path)
         .unwrap_err()
-        .contains("schema version 5"));
+        .contains("schema version 6"));
     assert_eq!(fs::read(&path).unwrap(), bytes);
 }
 
@@ -1383,7 +1384,7 @@ fn integration_frame_processing_detects_changed_files_invalid_replies_and_early_
     oversized_log.ffmpeg = script(
         &root,
         "oversized-frame-log",
-        "printf '%065540d\\n' 0 >&2\nsleep 30",
+        "printf '%065540d\\n' 0 >&2\nexec sleep 30",
     );
     let started = Instant::now();
     assert!(

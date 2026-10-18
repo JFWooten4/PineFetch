@@ -4,8 +4,8 @@
     "version": "2.4.0",
     "identifier": "com.pinefetch.app",
     "build": {
-        "beforeBuildCommand": "npm run sync:design-system",
-        "beforeDevCommand": "node scripts/dev-server.mjs",
+        "beforeBuildCommand": "npm run sync:design-system && npm run prepare:social-runtime",
+        "beforeDevCommand": "npm run prepare:social-runtime && node scripts/dev-server.mjs",
         "additionalWatchFolders": ["../native", "../scripts"],
         "devUrl": "http://127.0.0.1:1420",
         "frontendDist": "../src"
@@ -37,6 +37,7 @@
             "resources/ffmpeg-runtime",
             "resources/deno-runtime",
             "resources/ocr-runtime",
+            "resources/social-runtime",
             "icons/icon.png"
         ],
         "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"]

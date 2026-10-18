@@ -1164,3 +1164,25 @@ body {
         transform: none;
     }
 }
+
+.pinefetch-social-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--oj-space-4);
+    margin-block-start: var(--oj-space-4);
+}
+.pinefetch-social-metric {
+    padding: var(--oj-space-4);
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+@media (max-width: 800px) {
+    .pinefetch-social-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 480px) {
+    .pinefetch-social-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

@@ -35,6 +35,27 @@ pub(crate) fn resolve_ocr_helper(app: &AppHandle) -> Result<std::path::PathBuf, 
     )
 }
 
+pub(crate) fn resolve_social_insights_tools(
+    app: &AppHandle,
+) -> Result<crate::social_insights::SocialInsightsTools, String> {
+    for relative in ["social-runtime", "resources/social-runtime"] {
+        if let Ok(directory) = app
+            .path()
+            .resolve(relative, tauri::path::BaseDirectory::Resource)
+        {
+            let node = directory.join(if cfg!(windows) { "node.exe" } else { "node" });
+            let script = directory.join("social-insights.cjs");
+            if node.is_file() && script.is_file() {
+                return Ok(crate::social_insights::SocialInsightsTools { node, script });
+            }
+        }
+    }
+    Err(
+        "The bundled Social Insights runtime is unavailable. Rebuild or reinstall PineFetch."
+            .into(),
+    )
+}
+
 pub(crate) fn ffmpeg_tool_name() -> &'static str {
     if cfg!(windows) {
         "ffmpeg.exe"

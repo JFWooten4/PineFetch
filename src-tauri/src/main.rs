@@ -56,6 +56,7 @@ mod reuse_tests;
 mod runtime;
 #[cfg(test)]
 mod runtime_failure_tests;
+mod social_insights;
 mod startup;
 mod state;
 #[cfg(test)]
@@ -151,6 +152,8 @@ fn main() {
             commands::get_history,
             commands::get_history_stats,
             commands::get_history_details,
+            commands::get_history_social_insights,
+            commands::load_history_social_insights,
             commands::get_history_transcript,
             commands::get_history_caption,
             commands::start_history_ocr,

@@ -17,13 +17,14 @@
         "test:js": "node --test --test-timeout=30000 \"test/*.test.mjs\"",
         "test:ui": "node test/design-system-ui.mjs",
         "test:rust": "node scripts/run-rust-tests.mjs all",
-        "build:check": "npm run sync:design-system && cargo build --manifest-path src-tauri/Cargo.toml --locked --release --features custom-protocol",
+        "build:check": "npm run sync:design-system && npm run prepare:social-runtime && cargo build --manifest-path src-tauri/Cargo.toml --locked --release --features custom-protocol",
         "dev": "npm run sync:version && tauri dev",
         "sync:version": "node scripts/sync-tauri-version.mjs",
         "sync:icons": "node scripts/sync-icons.mjs",
         "screenshots": "node scripts/screenshots.mjs",
         "prepare:whisper-runtime": "bash scripts/prepare-whisper-runtime.sh",
         "prepare:ffmpeg-runtime": "bash scripts/prepare-ffmpeg-runtime.sh",
+        "prepare:social-runtime": "node scripts/prepare-social-runtime.mjs",
         "prepare:deno-runtime": "bash scripts/prepare-deno-runtime.sh",
         "prepare:windows-runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-windows-runtime.ps1",
         "build": "npm run sync:version && npm run prepare:whisper-runtime && npm run prepare:ffmpeg-runtime && npm run prepare:deno-runtime && tauri build",
@@ -67,6 +68,7 @@
     },
     "homepage": "https://oliverjessner.at/pinefetch",
     "dependencies": {
+        "fetchary": "2.0.4",
         "oj-designsystem": "0.1.0"
     }
 }

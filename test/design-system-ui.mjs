@@ -35,6 +35,12 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
         commands: [],
         copied: '',
         ocrRecords: {},
+        socialRecords: {},
+        socialFetches: 0,
+        holdSocial: false,
+        releaseSocial: null,
+        failSocial: false,
+        unsupportedSocial: false,
         ocrProgress: {},
         ocrAttempt: 0,
         holdOcr: false,
@@ -184,6 +190,56 @@ const installUiResponses = ({ fallbackFrame, playlistVideos }) => {
                 has_more: offset + (request.limit || 100) < filtered.length,
             };
         };
+        if (command === 'get_history_social_insights') return structuredClone(ui.socialRecords[args.id] || null);
+        if (command === 'load_history_social_insights') {
+            ui.socialFetches++;
+            const complete = () => {
+                if (ui.failSocial) throw new Error('Fixture network request failed');
+                const names = [
+                    'views',
+                    'likes',
+                    'comments',
+                    'shares',
+                    'saves',
+                    'followers',
+                    'following',
+                    'posts',
+                    'subscribers',
+                ];
+                const metrics = Object.fromEntries(names.map(name => [name, null]));
+                if (!ui.unsupportedSocial) Object.assign(metrics, { views: 12345, likes: 0, comments: 56 });
+                const result = {
+                    history_entry_id: args.id,
+                    source_url: 'https://www.youtube.com/watch?v=fixture',
+                    fetched_at: 1700000000000 + ui.socialFetches * 60000,
+                    fetchary_version: '2.0.4',
+                    data: {
+                        platform: 'youtube',
+                        kind: 'video',
+                        url: 'https://www.youtube.com/watch?v=fixture',
+                        metrics,
+                        status: ui.unsupportedSocial ? 'unsupported' : 'partial',
+                        sources: { views: { approximate: true } },
+                        unavailable: { shares: 'unsupported' },
+                    },
+                };
+                ui.socialRecords[args.id] = result;
+                return structuredClone(result);
+            };
+            if (ui.holdSocial) {
+                ui.holdSocial = false;
+                return new Promise((resolve, reject) => {
+                    ui.releaseSocial = () => {
+                        try {
+                            resolve(complete());
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                });
+            }
+            return complete();
+        }
         if (command === 'get_history_ocr') {
             const content = ocrPage(args);
             if (ui.holdOcr) {
@@ -2056,6 +2112,91 @@ try {
             assert.equal(await page.locator('#historyOcrText').textContent(), savedOcrText);
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.ocrSourceError = null;
+            });
+            await closeDetails();
+
+            // Social Insights load from SQLite on tab open; only a click starts a fetch.
+            await openOcr('history-1');
+            await page.locator('#historyOcrTab').focus();
+            await page.keyboard.press('ArrowRight');
+            assert.equal(await page.locator('#historySocialTab').getAttribute('aria-selected'), 'true');
+            await page.waitForFunction(() =>
+                globalThis.document
+                    .querySelector('#historySocialStatus')
+                    .textContent.includes('No Social Insights saved')
+            );
+            assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.socialFetches), 0);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdSocial = true;
+            });
+            await page.locator('#historySocialLoadBtn').click();
+            await page.waitForFunction(() => Boolean(globalThis.__pinefetchUi.releaseSocial));
+            assert(await page.locator('#historySocialLoadBtn').isDisabled());
+            assert.equal(await page.locator('#historySocialLoadBtn').getAttribute('aria-busy'), 'true');
+            assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.socialFetches), 1);
+            await closeDetails();
+            await openOcr('history-2');
+            await page.locator('#historySocialTab').click();
+            await page.waitForFunction(() =>
+                globalThis.document
+                    .querySelector('#historySocialStatus')
+                    .textContent.includes('No Social Insights saved')
+            );
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseSocial());
+            assert.equal(await page.locator('#historySocialMetrics').textContent(), '');
+            await closeDetails();
+            await openOcr('history-1');
+            await page.locator('#historySocialTab').click();
+            await page.waitForFunction(
+                () => globalThis.document.querySelectorAll('.pinefetch-social-metric').length === 9
+            );
+            assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.socialFetches), 1);
+            const insightCards = page.locator('.pinefetch-social-metric');
+            assert.match(await insightCards.nth(0).textContent(), /12[,.]345.*Approximate/s);
+            assert.match(await insightCards.nth(1).textContent(), /Likes0Public count/);
+            assert.match(await insightCards.nth(3).textContent(), /Shares—Not supported/);
+            assert.match(await page.locator('#historySocialMeta').textContent(), /Fetched.*YouTube/);
+            const storedMeta = await page.locator('#historySocialMeta').textContent();
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failSocial = true;
+            });
+            await page.locator('#historySocialLoadBtn').click();
+            await page.waitForFunction(() =>
+                globalThis.document
+                    .querySelector('#historySocialStatus')
+                    .textContent.includes('Previously saved data is still shown')
+            );
+            assert.equal(await page.locator('#historySocialMeta').textContent(), storedMeta);
+            assert.match(await insightCards.nth(0).textContent(), /12[,.]345/);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failSocial = false;
+            });
+            await page.locator('#historySocialLoadBtn').click();
+            await page.waitForFunction(
+                previous => globalThis.document.querySelector('#historySocialMeta').textContent !== previous,
+                storedMeta
+            );
+            await page.locator('.oj-toast button').evaluateAll(buttons => buttons.forEach(button => button.click()));
+            await page.screenshot({ path: `/tmp/pinefetch-social-insights-${engine.name()}.png` });
+            await page.setViewportSize({ width: 800, height: 960 });
+            assert(await page.locator('#historySocialPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
+            await page.setViewportSize({ width: 1400, height: 960 });
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.unsupportedSocial = true;
+            });
+            await page.locator('#historySocialLoadBtn').click();
+            await page.waitForFunction(() =>
+                globalThis.document.querySelector('#historySocialStatus').textContent.includes('not supported')
+            );
+            assert.equal(
+                await page
+                    .locator('#historySocialMetrics .oj-heading-2')
+                    .allTextContents()
+                    .then(values => values.every(value => value === '—')),
+                true
+            );
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.unsupportedSocial = false;
             });
             await closeDetails();
 

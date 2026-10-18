@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
-pub(super) const SCHEMA_VERSION: i64 = 4;
+pub(super) const SCHEMA_VERSION: i64 = 5;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 // The reported upgraded layout retains this stronger, compatible constraint.
 const LEGACY_HISTORY_VERSION: &str = "2.1.0";
@@ -88,6 +88,17 @@ CREATE TABLE history_ocr_frames (
 );
 CREATE INDEX idx_history_ocr_frames_order ON history_ocr_frames(history_entry_id, timestamp_ms, id);
 CREATE UNIQUE INDEX idx_history_ocr_frames_sample ON history_ocr_frames(history_entry_id, frame_key);
+"#;
+
+const SOCIAL_INSIGHTS_SQL: &str = r#"
+CREATE TABLE history_social_insights (
+    history_entry_id TEXT PRIMARY KEY NOT NULL,
+    source_url TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL CHECK (fetched_at >= 0),
+    fetchary_version TEXT NOT NULL,
+    payload_json TEXT NOT NULL CHECK (length(payload_json) <= 262144),
+    FOREIGN KEY (history_entry_id) REFERENCES history_entries(id) ON DELETE CASCADE
+);
 "#;
 
 pub(super) fn open(path: &Path) -> Result<Connection, String> {
@@ -186,6 +197,7 @@ pub(super) enum MigrationPoint {
     Receipts,
     Ocr,
     OcrFrames,
+    SocialInsights,
 }
 
 pub(super) fn initialize_with_hook(
@@ -268,6 +280,13 @@ pub(super) fn initialize_with_hook(
         tx.pragma_update(None, "user_version", 4)
             .map_err(|e| e.to_string())?;
         hook(MigrationPoint::OcrFrames)?;
+    }
+    if version < 5 {
+        tx.execute_batch(SOCIAL_INSIGHTS_SQL)
+            .map_err(|e| format!("SQLite migration 5 failed: {e}"))?;
+        tx.pragma_update(None, "user_version", 5)
+            .map_err(|e| e.to_string())?;
+        hook(MigrationPoint::SocialInsights)?;
     }
     if check_version(&tx)? != SCHEMA_VERSION {
         return Err(
@@ -438,6 +457,11 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
             .execute_batch(OCR_FRAMES_SQL)
             .map_err(|e| e.to_string())?;
     }
+    if version >= 5 {
+        reference
+            .execute_batch(SOCIAL_INSIGHTS_SQL)
+            .map_err(|e| e.to_string())?;
+    }
     reference
         .execute_batch("CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
         .map_err(|e| e.to_string())?;
@@ -484,6 +508,11 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
         if version >= 4 && !tables.contains("history_ocr_frames") {
             return Err(
                 "Inconsistent schema 4: missing history_ocr_frames; database preserved".into(),
+            );
+        }
+        if version >= 5 && !tables.contains("history_social_insights") {
+            return Err(
+                "Inconsistent schema 5: missing history_social_insights; database preserved".into(),
             );
         }
     } else if (tables.contains("captions") || tables.contains("transcriptions"))
@@ -621,6 +650,12 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
                 || !canonical.contains("check(full_text!='')"))
         {
             return Err(format!("{} (OCR frame constraints)", fail()));
+        }
+        if table == "history_social_insights"
+            && (!canonical.contains("check(fetched_at>=0)")
+                || !canonical.contains("check(length(payload_json)<=262144)"))
+        {
+            return Err(format!("{} (Social Insights constraints)", fail()));
         }
         if version < SCHEMA_VERSION {
             // SQLite's historical TEXT PRIMARY KEY permits NULL. Refuse

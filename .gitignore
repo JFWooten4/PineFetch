@@ -30,3 +30,8 @@ src-tauri/resources/deno-runtime/*
 !src-tauri/resources/deno-runtime/PLACEHOLDER
 src-tauri/resources/ocr-runtime/*
 !src-tauri/resources/ocr-runtime/PLACEHOLDER
+
+src-tauri/resources/social-runtime/*
+!src-tauri/resources/social-runtime/PLACEHOLDER
+src-tauri/resources/.social-runtime-*/
+src-tauri/resources/social-runtime.previous/

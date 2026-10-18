@@ -664,7 +664,41 @@
                                 >
                                     OCR Text
                                 </button>
+                                <button
+                                    id="historySocialTab"
+                                    class="oj-tab"
+                                    type="button"
+                                    role="tab"
+                                    aria-selected="false"
+                                    aria-controls="historySocialPanel"
+                                >
+                                    Social Insights
+                                </button>
                             </div>
+
+                            <section
+                                id="historySocialPanel"
+                                class="oj-tab-panel pinefetch-history-details-panel"
+                                role="tabpanel"
+                                aria-labelledby="historySocialTab"
+                                hidden
+                            >
+                                <div class="oj-toolbar">
+                                    <h3 class="oj-heading-3 oj-grow">Social Insights</h3>
+                                    <button id="historySocialLoadBtn" class="oj-button oj-button-primary" type="button">
+                                        Load Social Insights
+                                    </button>
+                                </div>
+                                <p class="oj-helper">
+                                    Public metrics from the original video URL. Updated only when you load or refresh
+                                    them.
+                                </p>
+                                <div id="historySocialResults">
+                                    <p id="historySocialStatus" class="oj-status" role="status" aria-live="polite"></p>
+                                    <p id="historySocialMeta" class="oj-helper"></p>
+                                    <div id="historySocialMetrics" class="pinefetch-social-grid"></div>
+                                </div>
+                            </section>
 
                             <section
                                 id="historyOverviewPanel"
