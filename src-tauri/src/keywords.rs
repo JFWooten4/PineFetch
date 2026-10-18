@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 
 const MAX_TEXT_BYTES: usize = 128 * 1024 * 1024;
 const MAX_TERMS: usize = 50_000;
+const MIN_OCCURRENCES: u64 = 5;
 static STOP_WORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     "aber alle allem allen aller alles als also am an andere anderen anderer anderes auch auf aus bei bin bis bist da dabei dadurch dafür daher damit dann das dass daß dein deine dem den denn der des die dies diese diesem diesen dieser dieses doch dort du durch ein eine einem einen einer eines er es etwas euch euer eure für ganz gegen gehabt haben hat hatte hatten hast hier hin hinter ich ihr ihre ihrem ihren ihrer ihres im in ins ist ja jede jedem jeden jeder jedes jetzt kann kein keine keinem keinen keiner keines können konnte machen man mehr mein meine mich mir mit muss nach nicht nichts noch nun nur ob oder ohne sehr sein seine seinem seinen seiner seines selbst sich sie sind so solche sollte sondern sonst über um und uns unser unsere unter vom von vor war waren warst was welche welchem welchen welcher welches wenn werde werden werdet weshalb wie wieder wir wird wirst wo zu zum zur zwischen the a an and are as at be been being but by can could did do does for from had has have he her here hers him his how if in into is it its just may me more most my no nor not of on once only or other our out over own same she should some such than that their theirs them then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your yours about also because both each few much must now off ours shall since still themselves upon us want well were all any don dont doesnt isnt wasnt wouldnt couldve ive youre thats its let lets webvtt kind language captions www com http https".split_whitespace().collect()
 });
@@ -80,14 +81,9 @@ impl Miner {
         let mut terms: Vec<_> = self
             .terms
             .into_iter()
-            .filter(|(_, term)| term.total > 1)
+            .filter(|(_, term)| term.total >= MIN_OCCURRENCES)
             .collect();
-        terms.sort_by(|(ak, a), (bk, b)| {
-            b.sources
-                .cmp(&a.sources)
-                .then(b.total.cmp(&a.total))
-                .then(ak.cmp(bk))
-        });
+        terms.sort_by(|(ak, a), (bk, b)| b.total.cmp(&a.total).then(ak.cmp(bk)));
         terms.into_iter().map(|(_, term)| term).collect()
     }
 }
@@ -146,12 +142,12 @@ mod tests {
         let mut miner = Miner::default();
         miner
             .add(
-                "[00:00:10 → 00:00:15] Der Nintendo DSi: Nintendo, Pokémon und AI AI in 4K 4K!",
+                "[00:00:10 → 00:00:15] Der Nintendo DSi: Nintendo Nintendo, DSi DSi DSi Pokémon und AI AI AI AI AI in 4K 4K 4K 4K 4K!",
                 0,
             )
             .unwrap();
         miner.add("NINTENDO\nDSi Pokémon", 1).unwrap();
-        miner.add("Nintendo Pokémon Pokémon.", 2).unwrap();
+        miner.add("Nintendo Pokémon Pokémon Pokémon.", 2).unwrap();
         let terms = miner.finish();
         let term = terms.iter().find(|t| t.term == "Nintendo").unwrap();
         assert_eq!(
@@ -162,17 +158,17 @@ mod tests {
                 term.total,
                 term.sources
             ),
-            (2, 1, 1, 4, 3)
+            (3, 1, 1, 5, 3)
         );
         assert!(terms.iter().any(|t| t.term == "AI"));
         assert!(terms.iter().any(|t| t.term == "4K"));
         assert!(!terms
             .iter()
             .any(|t| ["Der", "und", "in", "00", "10", "15"].contains(&t.term.as_str())));
-        assert_eq!(terms[0].sources, 3);
+        assert!(terms.iter().all(|term| term.total >= 5));
         let mut different = Miner::default();
         different
-            .add("Game Game games games Spiel Spiel Spiele Spiele", 0)
+            .add(&"Game games Spiel Spiele ".repeat(5), 0)
             .unwrap();
         assert_eq!(different.finish().len(), 4);
     }
@@ -182,7 +178,8 @@ mod tests {
         for source in 0..3 {
             miner
                 .add(
-                    "DER die Das DEM den DES EIN eine Einem EINEN einer EINES THE a AN Nintendo",
+                    &"DER die Das DEM den DES EIN eine Einem EINEN einer EINES THE a AN Nintendo "
+                        .repeat(2),
                     source,
                 )
                 .unwrap();
@@ -194,25 +191,34 @@ mod tests {
         assert_eq!(terms[0].term, "Nintendo");
         assert_eq!(
             (terms[0].transcript, terms[0].ocr, terms[0].captions),
-            (1, 1, 1)
+            (2, 2, 2)
         );
     }
 
     #[test]
-    fn only_terms_with_two_or_more_occurrences_across_all_sources_are_returned() {
+    fn five_total_occurrences_qualify_and_sort_by_total_descending_then_alphabetically() {
         let mut miner = Miner::default();
-        miner.add("Einmal Doppelt Doppelt Gemeinsam", 0).unwrap();
-        miner.add("gemeinsam Einzigartig", 1).unwrap();
-        miner.add("Nurcaption", 2).unwrap();
+        miner.add("Below Below Below Below Solo Solo Solo Solo Solo Frequent Frequent Frequent Frequent Frequent Frequent Frequent Alpha Alpha Alpha Beta Beta Beta Shared Shared", 0).unwrap();
+        miner.add("Alpha Alpha Beta Beta Shared Shared", 1).unwrap();
+        miner.add("Shared", 2).unwrap();
         let terms = miner.finish();
-        assert_eq!(terms.len(), 2);
-        let shared = terms.iter().find(|t| t.term == "Gemeinsam").unwrap();
-        assert_eq!((shared.transcript, shared.ocr, shared.total), (1, 1, 2));
-        let repeated = terms.iter().find(|t| t.term == "Doppelt").unwrap();
         assert_eq!(
-            (repeated.transcript, repeated.sources, repeated.total),
-            (2, 1, 2)
+            terms
+                .iter()
+                .map(|term| (term.term.as_str(), term.total))
+                .collect::<Vec<_>>(),
+            [
+                ("Frequent", 7),
+                ("Alpha", 5),
+                ("Beta", 5),
+                ("Shared", 5),
+                ("Solo", 5)
+            ]
         );
+        let shared = terms.iter().find(|t| t.term == "Shared").unwrap();
+        assert_eq!((shared.transcript, shared.ocr, shared.captions), (2, 2, 1));
+        let solo = terms.iter().find(|t| t.term == "Solo").unwrap();
+        assert_eq!((solo.transcript, solo.sources), (5, 1));
     }
 
     #[test]
@@ -244,7 +250,7 @@ mod tests {
             INSERT INTO history_ocr(history_entry_id,text,last_attempt_id,last_attempt_status,last_attempt_at,result_revision) VALUES ('video','Legacy Nintendo','original','completed',1,'original-revision');
             INSERT INTO captions(history_entry_id,media_path,caption_path,text,created_at) VALUES ('video','missing.mp4','missing.txt','Nintendo captions',1),('video','other.mp4','other.txt','Nintendo second',2);").unwrap();
         for index in 0..251 {
-            conn.execute("INSERT INTO history_ocr_frames(id,history_entry_id,timestamp_ms,full_text,blocks_json) VALUES (?1,'video',?2,?3,'[]')", params![format!("frame-{index}"),index*1000, if index==250 {"RareLastFrame RareLastFrame Nintendo"} else {"Nintendo"}]).unwrap();
+            conn.execute("INSERT INTO history_ocr_frames(id,history_entry_id,timestamp_ms,full_text,blocks_json) VALUES (?1,'video',?2,?3,'[]')", params![format!("frame-{index}"),index*1000, if index==250 {"RareLastFrame RareLastFrame RareLastFrame RareLastFrame RareLastFrame Nintendo"} else {"Nintendo"}]).unwrap();
         }
         let db = Database::new(conn);
         let result = mine(&db, "video").unwrap();

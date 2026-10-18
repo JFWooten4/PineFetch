@@ -35,46 +35,6 @@
                 "captions": 2,
                 "total": 5,
                 "sources": 3
-            },
-            {
-                "term": "SoulSilver",
-                "transcript": 2,
-                "ocr": 1,
-                "captions": 1,
-                "total": 4,
-                "sources": 3
-            },
-            {
-                "term": "Display",
-                "transcript": 1,
-                "ocr": 0,
-                "captions": 1,
-                "total": 2,
-                "sources": 2
-            },
-            {
-                "term": "Handheld",
-                "transcript": 1,
-                "ocr": 0,
-                "captions": 1,
-                "total": 2,
-                "sources": 2
-            },
-            {
-                "term": "Spiel",
-                "transcript": 1,
-                "ocr": 0,
-                "captions": 1,
-                "total": 2,
-                "sources": 2
-            },
-            {
-                "term": "Touchscreen",
-                "transcript": 1,
-                "ocr": 0,
-                "captions": 1,
-                "total": 2,
-                "sources": 2
             }
         ]
     }

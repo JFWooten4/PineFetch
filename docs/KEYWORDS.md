@@ -5,9 +5,9 @@ and Social Insights. The tab mines the text already stored in the local SQLite
 database. It makes no network request and opens no media or TXT files. It does
 not start a transcription, OCR analysis or Social Insights fetch.
 
-Only words occurring at least twice in total across all saved sources are
-included. Two occurrences in one source qualify, as does one occurrence in each
-of two sources. Single occurrences are excluded from the mining result.
+Only words occurring at least **5 times in total** across all saved sources are
+included. Occurrences may come from one source or be spread across multiple
+sources. Words occurring fewer than 5 times are excluded from the mining result.
 
 The table shows occurrences per source and their total:
 
@@ -26,8 +26,7 @@ eines**, regardless of letter case. Articles are excluded from all three sources
 even when repeated. This is word counting:
 there is no stemming, plural merging, phrase extraction or semantic AI analysis.
 
-Words present in more source types appear first, followed by total occurrence
-count and alphabetical order. **Sources** filters to one source or all three;
+Words are sorted by **Total descending**, with alphabetical order breaking ties. **Sources** filters to one source or all three;
 **Search keywords** searches every term, including those beyond the initial 200
 visible rows. **Load more keywords** expands the table in steps of 200.
 

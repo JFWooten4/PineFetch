@@ -728,8 +728,9 @@
                                     </button>
                                 </div>
                                 <p class="oj-helper">
-                                    Words found at least twice across the saved transcript, OCR and captions. Common
-                                    German/English words, numbers and timestamps are excluded.
+                                    Words found at least 5 times across the saved transcript, OCR and captions, sorted
+                                    by total descending. Common German/English words, numbers and timestamps are
+                                    excluded.
                                 </p>
                                 <div class="oj-cluster pinefetch-keyword-filters">
                                     <label class="oj-field oj-grow" for="historyKeywordsSearch">
@@ -772,7 +773,7 @@
                                                     <th scope="col" class="oj-numeric">Transcript</th>
                                                     <th scope="col" class="oj-numeric">OCR</th>
                                                     <th scope="col" class="oj-numeric">Captions</th>
-                                                    <th scope="col" class="oj-numeric">Total</th>
+                                                    <th scope="col" class="oj-numeric" aria-sort="descending">Total</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="historyKeywordsRows"></tbody>

@@ -84,7 +84,7 @@ Open a History entry to inspect its metadata, transcript and saved caption track
 
 ![PineFetch Social Insights screen](src/images/mockups/social_insights.webp)
 
-**Keywords** compares word occurrences across the saved transcript, all OCR frames and captions, including only words found at least twice in total. Search terms, filter by source or show words present in all three. Counts update when you reopen the tab or select **Refresh Keywords**.
+**Keywords** compares word occurrences across the saved transcript, all OCR frames and captions, including only words found at least five times in total, sorted by Total descending. Search terms, filter by source or show words present in all three. Counts update when you reopen the tab or select **Refresh Keywords**.
 
 ![PineFetch Keywords screen](src/images/mockups/keywords.webp)
 

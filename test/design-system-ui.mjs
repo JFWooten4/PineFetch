@@ -2235,7 +2235,7 @@ try {
             const keywordSearch = page.locator('#historyKeywordsSearch');
             const keywordSource = page.locator('#historyKeywordsSource');
             await page.waitForFunction(
-                () => globalThis.document.querySelectorAll('#historyKeywordsRows tr').length === 8
+                () => globalThis.document.querySelectorAll('#historyKeywordsRows tr').length === 3
             );
             assert.deepEqual(await keywordRows.first().locator('th,td').allTextContents(), [
                 'Nintendo',
@@ -2248,14 +2248,19 @@ try {
                 await page.locator('#historyKeywordsMeta').textContent(),
                 /Transcript available.*1 OCR frame.*1 saved caption/
             );
+            assert.deepEqual(await keywordRows.locator('td:last-child').allTextContents(), ['6', '5', '5']);
+            assert.equal(
+                await page.locator('#historyKeywordsTable th[aria-sort]').getAttribute('aria-sort'),
+                'descending'
+            );
             await keywordSource.selectOption('shared');
-            assert.equal(await keywordRows.count(), 4);
+            assert.equal(await keywordRows.count(), 3);
             await keywordSource.selectOption('ocr');
-            assert.equal(await keywordRows.count(), 4);
+            assert.equal(await keywordRows.count(), 3);
             await keywordSource.selectOption('captions');
-            assert.equal(await keywordRows.count(), 8);
+            assert.equal(await keywordRows.count(), 3);
             await keywordSource.selectOption('transcript');
-            assert.equal(await keywordRows.count(), 8);
+            assert.equal(await keywordRows.count(), 3);
             await keywordSearch.fill('nInTeNdO');
             assert.equal(await keywordRows.count(), 1);
             await keywordSearch.fill('missing keyword');
@@ -2271,19 +2276,19 @@ try {
                 ui.keywordRecords['history-1'].terms.push(
                     ...Array.from({ length: 250 }, (_, i) => ({
                         term: `Term${i}`,
-                        transcript: 2,
+                        transcript: 5,
                         ocr: 0,
                         captions: 0,
-                        total: 2,
+                        total: 5,
                         sources: 1,
                     }))
                 );
                 ui.keywordRecords['history-1'].terms.push({
                     term: '<img src=x onerror=alert(1)>',
-                    transcript: 2,
+                    transcript: 5,
                     ocr: 0,
                     captions: 0,
-                    total: 2,
+                    total: 5,
                     sources: 1,
                 });
                 ui.holdKeywords = true;
@@ -2298,7 +2303,7 @@ try {
                 () => globalThis.document.querySelectorAll('#historyKeywordsRows tr').length === 200
             );
             await page.locator('#historyKeywordsLoadMoreBtn').click();
-            assert.equal(await keywordRows.count(), 259);
+            assert.equal(await keywordRows.count(), 254);
             assert.equal(await page.locator('#historyKeywordsRows img').count(), 0);
             await keywordSearch.fill('term249');
             assert.equal(await keywordRows.count(), 1);

@@ -34,7 +34,7 @@ export const createHistoryKeywordsView = ({ els, api, appendLog }) => {
             ? 'No keywords match these filters.'
             : sources && !sources.transcript && !sources.ocr_frames && !sources.ocr_legacy && !sources.captions
               ? 'No saved text is available. Create a transcript, run OCR or save captions first.'
-              : 'No keywords occur at least twice in the saved texts.';
+              : 'No keywords occur at least 5 times in the saved texts.';
         els.historyKeywordsTable.hidden = !terms.length;
         els.historyKeywordsLoadMoreBtn.hidden = terms.length <= state.limit;
         els.historyKeywordsLoadMoreBtn.disabled = state.loading;
