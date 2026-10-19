@@ -742,18 +742,34 @@
                                             placeholder="Search all keywords"
                                         />
                                     </label>
-                                    <label class="oj-field" for="historyKeywordsSource">
-                                        <span class="oj-label">Sources</span>
-                                        <select id="historyKeywordsSource" class="oj-select">
-                                            <option value="all">All keywords</option>
-                                            <option value="shared">In all three sources</option>
-                                            <option value="transcript">In transcript</option>
-                                            <option value="ocr">In OCR</option>
-                                            <option value="captions">In captions</option>
-                                        </select>
-                                    </label>
+                                    <div class="oj-field">
+                                        <span id="historyKeywordsSourceLabel" class="oj-label">Sources</span>
+                                        <div
+                                            id="historyKeywordsSourceDropdown"
+                                            class="oj-dropdown pinefetch-choice-dropdown"
+                                            data-oj-dropdown
+                                        >
+                                            <button
+                                                id="historyKeywordsSourceTrigger"
+                                                class="oj-button oj-button-secondary pinefetch-choice-trigger"
+                                                type="button"
+                                                data-oj-dropdown-trigger
+                                                aria-labelledby="historyKeywordsSourceLabel historyKeywordsSourceValue"
+                                            >
+                                                <span id="historyKeywordsSourceValue">All keywords</span>
+                                                <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                                            </button>
+                                            <div
+                                                id="historyKeywordsSourceMenu"
+                                                class="oj-menu"
+                                                data-oj-dropdown-menu
+                                                role="menu"
+                                                aria-labelledby="historyKeywordsSourceLabel"
+                                                hidden
+                                            ></div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <p id="historyKeywordsMeta" class="oj-helper"></p>
                                 <div id="historyKeywordsResults">
                                     <p
                                         id="historyKeywordsStatus"

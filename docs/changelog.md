@@ -1,5 +1,9 @@
 # 2.4.0
 
+- Removed the source availability summary from the Keywords tab.
+
+- Updated the Keywords Sources filter to use the same OJ choice menu as the History filters, including keyboard navigation and selected-option state.
+
 - Added a Keywords tab with local word mining across saved transcripts, all OCR frames and captions, per-source counts, search and source filters. Only keywords with at least five total occurrences are included, sorted by Total descending; German and English articles are excluded regardless of letter case.
 - Added reproducible offline screenshots for Social Insights and Keywords.
 

@@ -2233,7 +2233,8 @@ try {
             assert.equal(await page.locator('#historyKeywordsTab').getAttribute('aria-selected'), 'true');
             const keywordRows = page.locator('#historyKeywordsRows tr');
             const keywordSearch = page.locator('#historyKeywordsSearch');
-            const keywordSource = page.locator('#historyKeywordsSource');
+            const keywordSource = page.locator('#historyKeywordsSourceTrigger');
+            const keywordSourceMenu = page.locator('#historyKeywordsSourceMenu');
             await page.waitForFunction(
                 () => globalThis.document.querySelectorAll('#historyKeywordsRows tr').length === 3
             );
@@ -2244,22 +2245,31 @@ try {
                 '2',
                 '6',
             ]);
-            assert.match(
-                await page.locator('#historyKeywordsMeta').textContent(),
-                /Transcript available.*1 OCR frame.*1 saved caption/
-            );
             assert.deepEqual(await keywordRows.locator('td:last-child').allTextContents(), ['6', '5', '5']);
             assert.equal(
                 await page.locator('#historyKeywordsTable th[aria-sort]').getAttribute('aria-sort'),
                 'descending'
             );
-            await keywordSource.selectOption('shared');
+            await keywordSource.focus();
+            await page.keyboard.press('ArrowDown');
+            await keywordSourceMenu.waitFor();
+            assert.equal(await keywordSource.getAttribute('aria-expanded'), 'true');
+            assert.equal(await page.evaluate(() => globalThis.document.activeElement.dataset.ojValue), 'all');
+            await page.keyboard.press('ArrowDown');
+            await page.keyboard.press('Enter');
+            await keywordSourceMenu.waitFor({ state: 'hidden' });
+            assert.equal(await page.locator('#historyKeywordsSourceValue').textContent(), 'In all three sources');
+            assert.equal(
+                await keywordSourceMenu.locator('[aria-checked="true"]').getAttribute('data-oj-value'),
+                'shared'
+            );
+            assert(await keywordSource.evaluate(node => node === globalThis.document.activeElement));
             assert.equal(await keywordRows.count(), 3);
-            await keywordSource.selectOption('ocr');
+            await selectHistoryFilter('historyKeywordsSource', 'ocr', 'In OCR');
             assert.equal(await keywordRows.count(), 3);
-            await keywordSource.selectOption('captions');
+            await selectHistoryFilter('historyKeywordsSource', 'captions', 'In captions');
             assert.equal(await keywordRows.count(), 3);
-            await keywordSource.selectOption('transcript');
+            await selectHistoryFilter('historyKeywordsSource', 'transcript', 'In transcript');
             assert.equal(await keywordRows.count(), 3);
             await keywordSearch.fill('nInTeNdO');
             assert.equal(await keywordRows.count(), 1);
@@ -2267,7 +2277,19 @@ try {
             assert.match(await page.locator('#historyKeywordsEmpty').textContent(), /No keywords match/);
             assert(await page.locator('#historyKeywordsTable').isHidden());
             await keywordSearch.fill('');
-            await keywordSource.selectOption('all');
+            await selectHistoryFilter('historyKeywordsSource', 'all', 'All keywords');
+            await keywordSource.focus();
+            await page.keyboard.press('ArrowUp');
+            await keywordSourceMenu.waitFor();
+            assert.equal(await page.evaluate(() => globalThis.document.activeElement.dataset.ojValue), 'captions');
+            await page.keyboard.press('Escape');
+            await keywordSourceMenu.waitFor({ state: 'hidden' });
+            assert(await keywordSource.evaluate(node => node === globalThis.document.activeElement));
+            await keywordSource.click();
+            await keywordSourceMenu.waitFor();
+            await keywordSearch.click();
+            await keywordSourceMenu.waitFor({ state: 'hidden' });
+            assert.equal(await page.locator('#historyKeywordsSourceValue').textContent(), 'All keywords');
             await page.setViewportSize({ width: 600, height: 960 });
             assert(await page.locator('#historyKeywordsPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
             await page.setViewportSize({ width: 1400, height: 960 });
@@ -2304,6 +2326,12 @@ try {
             );
             await page.locator('#historyKeywordsLoadMoreBtn').click();
             assert.equal(await keywordRows.count(), 254);
+            await selectHistoryFilter('historyKeywordsSource', 'ocr', 'In OCR', true);
+            assert.equal(await keywordRows.count(), 3);
+            await selectHistoryFilter('historyKeywordsSource', 'all', 'All keywords');
+            assert.equal(await keywordRows.count(), 200);
+            await page.locator('#historyKeywordsLoadMoreBtn').click();
+            assert.equal(await keywordRows.count(), 254);
             assert.equal(await page.locator('#historyKeywordsRows img').count(), 0);
             await keywordSearch.fill('term249');
             assert.equal(await keywordRows.count(), 1);
@@ -2330,6 +2358,7 @@ try {
             await openOcr('history-2');
             await page.locator('#historyKeywordsTab').click();
             await page.locator('#historyKeywordsEmpty').waitFor();
+            assert.equal(await page.locator('#historyKeywordsSourceValue').textContent(), 'All keywords');
             assert.match(await page.locator('#historyKeywordsEmpty').textContent(), /No saved text is available/);
             await page.evaluate(() => globalThis.__pinefetchUi.releaseKeywords());
             assert.equal(await keywordRows.count(), 0);

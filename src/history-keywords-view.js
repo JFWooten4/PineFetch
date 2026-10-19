@@ -1,9 +1,22 @@
+import { createDropdownChoice } from './dropdown-choice.js';
+
 export const createHistoryKeywordsView = ({ els, api, appendLog }) => {
     const state = { id: null, request: 0, content: null, loading: false, limit: 200, error: '' };
+    const sourceChoice = createDropdownChoice({
+        menu: els.historyKeywordsSourceMenu,
+        value: els.historyKeywordsSourceValue,
+    });
+    sourceChoice.setOptions([
+        { value: 'all', label: 'All keywords' },
+        { value: 'shared', label: 'In all three sources' },
+        { value: 'transcript', label: 'In transcript' },
+        { value: 'ocr', label: 'In OCR' },
+        { value: 'captions', label: 'In captions' },
+    ]);
     const render = () => {
         const content = state.content;
         const query = els.historyKeywordsSearch.value.trim().toLocaleLowerCase();
-        const source = els.historyKeywordsSource.value;
+        const source = sourceChoice.getValue();
         const terms = (content?.terms || []).filter(
             term =>
                 term.term.toLocaleLowerCase().includes(query) &&
@@ -12,16 +25,9 @@ export const createHistoryKeywordsView = ({ els, api, appendLog }) => {
         els.historyKeywordsRefreshBtn.disabled = !api.available || !state.id || state.loading;
         els.historyKeywordsRefreshBtn.setAttribute('aria-busy', String(state.loading));
         els.historyKeywordsSearch.disabled = state.loading || !content;
-        els.historyKeywordsSource.disabled = state.loading || !content;
+        els.historyKeywordsSourceTrigger.disabled = state.loading || !content;
         els.historyKeywordsResults.setAttribute('aria-busy', String(state.loading));
         const sources = content?.sources;
-        els.historyKeywordsMeta.textContent = sources
-            ? [
-                  sources.transcript ? 'Transcript available' : 'No saved transcript',
-                  `${sources.ocr_frames.toLocaleString()} OCR ${sources.ocr_frames === 1 ? 'frame' : 'frames'}${sources.ocr_legacy ? ' + legacy text' : ''}`,
-                  `${sources.captions.toLocaleString()} saved ${sources.captions === 1 ? 'caption' : 'captions'}`,
-              ].join(' · ')
-            : '';
         els.historyKeywordsStatus.textContent =
             state.error ||
             (state.loading
@@ -60,7 +66,7 @@ export const createHistoryKeywordsView = ({ els, api, appendLog }) => {
         Object.assign(state, { id, content: null, loading: false, limit: 200, error: '' });
         state.request++;
         els.historyKeywordsSearch.value = '';
-        els.historyKeywordsSource.value = 'all';
+        sourceChoice.setValue('all');
         render();
     };
     const load = async () => {
@@ -90,12 +96,21 @@ export const createHistoryKeywordsView = ({ els, api, appendLog }) => {
     };
     const bindEvents = () => {
         els.historyKeywordsRefreshBtn.addEventListener('click', () => void load());
-        for (const element of [els.historyKeywordsSearch, els.historyKeywordsSource]) {
-            element.addEventListener(element === els.historyKeywordsSearch ? 'input' : 'change', () => {
-                state.limit = 200;
-                render();
-            });
-        }
+        els.historyKeywordsSearch.addEventListener('input', () => {
+            state.limit = 200;
+            render();
+        });
+        els.historyKeywordsSourceDropdown.addEventListener('oj:select', event => {
+            if (
+                event.target !== els.historyKeywordsSourceDropdown ||
+                els.historyKeywordsSourceTrigger.disabled ||
+                !sourceChoice.hasValue(event.detail?.value)
+            )
+                return;
+            sourceChoice.setValue(event.detail.value);
+            state.limit = 200;
+            render();
+        });
         els.historyKeywordsLoadMoreBtn.addEventListener('click', () => {
             state.limit += 200;
             render();

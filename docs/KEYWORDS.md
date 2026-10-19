@@ -32,8 +32,7 @@ visible rows. **Load more keywords** expands the table in steps of 200.
 
 Opening the tab or selecting **Refresh Keywords** reads a consistent snapshot of
 the current saved texts, so deleted OCR frames and newly saved texts are reflected.
-Derived keywords are not stored separately. Missing sources are shown explicitly;
-if none have saved text, the tab explains what to create first. A failed refresh
+Derived keywords are not stored separately. If no sources have saved text, the tab explains what to create first. A failed refresh
 keeps the previous results visible. Requests completing after navigation cannot
 populate another video's results.
 
