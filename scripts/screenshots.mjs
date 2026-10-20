@@ -216,7 +216,7 @@ try {
     await capture('keywords.webp');
     await page.locator('#historyDetailsAccountBtn').click();
     await page.waitForFunction(
-        () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 4
+        () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 1
     );
     await capture('account.webp');
     await page.locator('#historyAccountBackBtn').click();

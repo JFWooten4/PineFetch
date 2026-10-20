@@ -43,6 +43,8 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
               ? 'Refresh Social Insights'
               : 'Load Social Insights';
         els.historySocialLoadBtn.setAttribute('aria-busy', String(loading));
+        els.historySocialLoadBtn.classList.toggle('oj-button-loading', loading);
+        els.historySocialStatus.classList.toggle('oj-status-error', Boolean(state.error));
         els.historySocialResults.setAttribute('aria-busy', String(state.reading || loading));
         els.historySocialStatus.textContent =
             state.error ||
@@ -57,6 +59,10 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
             ? `Fetched ${formatLocalDateTime(new Date(content.fetched_at))} · ${content.data.platform ? formatHistorySource(content.data.platform) : 'Unknown platform'}`
             : '';
         els.historySocialMetrics.replaceChildren();
+        if (profileMetrics) {
+            els.historySocialUnavailable.hidden = true;
+            els.historySocialUnavailableList.replaceChildren();
+        }
         if (!content) return;
         const entries = Object.entries(labels).filter(
             ([name]) =>
@@ -70,7 +76,19 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
                     Number(Number.isSafeInteger(content.data.metrics[right])) -
                     Number(Number.isSafeInteger(content.data.metrics[left]))
             );
+        let missing = 0;
         for (const [name, label] of entries) {
+            const count = content.data.metrics[name];
+            const available = Number.isSafeInteger(count) && count >= 0;
+            if (profileMetrics && !available) {
+                missing += 1;
+                const term = document.createElement('dt');
+                term.textContent = label;
+                const detail = document.createElement('dd');
+                detail.textContent = reasons[content.data.unavailable[name]] || 'Unavailable';
+                els.historySocialUnavailableList.append(term, detail);
+                continue;
+            }
             const card = document.createElement('div');
             card.className = 'oj-card pinefetch-social-metric';
             const heading = document.createElement('h3');
@@ -78,7 +96,6 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
             heading.textContent = label;
             const value = document.createElement('p');
             value.className = 'oj-heading-2 oj-mono';
-            const count = content.data.metrics[name];
             value.textContent = Number.isSafeInteger(count) && count >= 0 ? count.toLocaleString() : '—';
             const detail = document.createElement('p');
             detail.className = 'oj-helper';
@@ -90,6 +107,10 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
                       : 'Public count';
             card.append(heading, value, detail);
             els.historySocialMetrics.append(card);
+        }
+        if (profileMetrics) {
+            els.historySocialUnavailable.hidden = missing === 0;
+            els.historySocialUnavailableSummary.textContent = `${missing} ${missing === 1 ? 'metric' : 'metrics'} unavailable`;
         }
     };
     const reset = id => {
