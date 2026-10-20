@@ -4,6 +4,7 @@ import { formatHistorySource, formatLocalDateTime, formatUploadDate } from './fo
 import { createHistoryAccountView } from './history-account-view.js';
 import { createHistoryDetailsView } from './history-details-view.js';
 import { createHistoryOcrJobs, ocrActive } from './history-ocr-jobs.js';
+import { createPlatformIcon } from './platform-icons.js';
 
 export const createHistoryView = ({
     els,
@@ -190,7 +191,10 @@ export const createHistoryView = ({
             const row = document.createElement('li');
             row.className = 'oj-list-item';
             const name = document.createElement('span');
+            name.className = 'oj-inline pinefetch-history-source-name';
             name.textContent = formatHistorySource(entry?.source);
+            const icon = createPlatformIcon(entry?.source);
+            if (icon) name.prepend(icon);
             const value = document.createElement('strong');
             value.textContent = count.toLocaleString();
             row.append(name, value);
