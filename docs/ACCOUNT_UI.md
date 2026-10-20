@@ -5,7 +5,10 @@ badges, typography and spacing. It changes presentation only; account matching,
 network requests, storage, pagination and download behavior retain their existing
 contracts.
 
-The header groups the platform, account name and saved-download total. Open
+The header groups the platform, account name and saved-download total. Known
+platforms show their locally bundled Font Awesome brand icon beside the platform
+name, using the same icon mapping as the download queue. Icons are decorative;
+the readable name remains available for every platform, including unknown ones. Open
 profile stays visible and disabled until a profile URL is available, with an
 explanation. Once available, it opens the profile through the existing action.
 
