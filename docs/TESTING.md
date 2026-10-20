@@ -164,7 +164,12 @@ release are checked against state, not inferred from emitted events.
 No normal application test requires external network access or real platform
 downloads. Installing locked npm/Cargo dependencies may require network; that
 is build preparation, not a test exercising an external service. Release-gate
-Node tests use mocked publication/network commands and never publish.
+Node tests use mocked publication/network commands and never publish. Tap commit
+tests run the publish script against temporary Git repositories and local file
+remotes. They verify that only the PineFetch cask and tap README are committed,
+unrelated staged/untracked changes stay intact, preparation commits are pushed
+even when generated files are current, and failed releases do not push the tap.
+See [Publishing](RELEASING.md) for the release workflow and commit scope.
 
 Process, TCP and lock tests have internal deadlines. The Rust tier runner also
 limits discovery to 30 seconds and each executable test suite to 120 seconds;

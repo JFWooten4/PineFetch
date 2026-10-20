@@ -33,6 +33,26 @@ require_command() {
     fi
 }
 
+commit_homebrew_changes() {
+    HOMEBREW_COMMIT_MESSAGE=$1
+    set --
+    for tap_file in Casks/pinefetch.rb README.md; do
+        if [ -e "$HOMEBREW_TAP_DIR/$tap_file" ] ||
+            git -C "$HOMEBREW_TAP_DIR" ls-files --error-unmatch -- "$tap_file" >/dev/null 2>&1; then
+            set -- "$@" "$tap_file"
+        fi
+    done
+    if [ "$#" -eq 0 ]; then
+        return
+    fi
+
+    git -C "$HOMEBREW_TAP_DIR" add --all -- "$@"
+    if ! git -C "$HOMEBREW_TAP_DIR" diff --cached --quiet -- "$@"; then
+        # --only also leaves unrelated staged tap changes out of this commit.
+        git -C "$HOMEBREW_TAP_DIR" commit --only -m "$HOMEBREW_COMMIT_MESSAGE" -- "$@"
+    fi
+}
+
 require_command npm
 require_command node
 require_command git
@@ -48,11 +68,6 @@ if [ ! -d "$HOMEBREW_TAP_DIR/.git" ]; then
     exit 1
 fi
 
-if [ -n "$(git -C "$HOMEBREW_TAP_DIR" status --porcelain)" ]; then
-    echo "Homebrew tap has uncommitted changes. Commit or stash them before publishing."
-    exit 1
-fi
-
 git -C "$HOMEBREW_TAP_DIR" fetch origin
 TAP_BRANCH=$(git -C "$HOMEBREW_TAP_DIR" branch --show-current)
 if [ -z "$TAP_BRANCH" ]; then
@@ -60,7 +75,7 @@ if [ -z "$TAP_BRANCH" ]; then
     exit 1
 fi
 
-if ! git -C "$HOMEBREW_TAP_DIR" diff --quiet "HEAD..origin/$TAP_BRANCH"; then
+if [ "$(git -C "$HOMEBREW_TAP_DIR" rev-parse HEAD)" != "$(git -C "$HOMEBREW_TAP_DIR" rev-parse "origin/$TAP_BRANCH")" ]; then
     echo "Homebrew tap is not synchronized with origin/$TAP_BRANCH. Pull or push its commits before publishing."
     exit 1
 fi
@@ -72,6 +87,9 @@ if git rev-parse "$TAG" >/dev/null 2>&1 || gh release view "$TAG" --repo "$RELEA
     echo "Release $TAG already exists. Increase the version before publishing."
     exit 1
 fi
+
+# Preserve existing PineFetch tap edits before the generated cask replaces them.
+commit_homebrew_changes "Prepare PineFetch release $TAG"
 
 if [ -n "$(git status --porcelain)" ]; then
     echo "Committing working tree before release..."
@@ -128,14 +146,9 @@ if command -v brew >/dev/null 2>&1; then
     brew style "$HOMEBREW_TAP_DIR/Casks/pinefetch.rb"
 fi
 
-git -C "$HOMEBREW_TAP_DIR" add Casks/pinefetch.rb README.md
-
-if git -C "$HOMEBREW_TAP_DIR" diff --cached --quiet; then
-    echo "Homebrew cask already up to date."
-else
-    git -C "$HOMEBREW_TAP_DIR" commit -m "Update PineFetch cask to $TAG"
-    git -C "$HOMEBREW_TAP_DIR" push origin HEAD
-fi
+commit_homebrew_changes "Update PineFetch cask to $TAG"
+# Also publish a preparation commit if the generated cask was already current.
+git -C "$HOMEBREW_TAP_DIR" push origin HEAD
 
 echo "Release and Homebrew cask published successfully."
 
