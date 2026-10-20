@@ -45,7 +45,13 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
         holdAccount: false,
         releaseAccount: null,
         failAccount: false,
+        unavailableAccount: false,
         profileFetches: 0,
+        holdProfileVideos: false,
+        releaseProfileVideos: null,
+        failProfileVideos: false,
+        emptyProfileVideos: false,
+        failAccountRead: false,
         keywordRecords: { 'history-1': keywordFixture },
         holdKeywords: false,
         releaseKeywords: null,
@@ -222,6 +228,7 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
             return result;
         }
         if (command === 'get_history_account') {
+            if (ui.failAccountRead) throw new Error('Fixture account read failed');
             const entries = historyEntries || (await invoke('get_history', { offset: 0, limit: 100 })).entries;
             const entry = entries.find(entry => entry.id === args.id);
             if (!entry) throw new Error('Missing fixture account');
@@ -269,6 +276,12 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
                         unavailable: { likes: 'unsupported' },
                     },
                 };
+                if (ui.unavailableAccount) {
+                    snapshot.data.metrics = Object.fromEntries(
+                        Object.keys(snapshot.data.metrics).map(name => [name, null])
+                    );
+                    snapshot.data.status = 'unavailable';
+                }
                 ui.accountRecords[account.uploader] = snapshot;
                 return structuredClone(snapshot);
             };
@@ -288,12 +301,30 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
         }
         if (command === 'load_history_account_videos') {
             ui.profileFetches++;
-            return {
-                profile_url: 'https://www.youtube.com/@fixture',
-                entries: [{ url: ui.playlistVideos[0].url, title: '<img src=x> Profile video' }],
-                next_offset: 50,
-                has_more: !args.offset,
+            const complete = () => {
+                if (ui.failProfileVideos) throw new Error('Fixture profile unavailable');
+                return {
+                    profile_url: 'https://www.youtube.com/@fixture',
+                    entries: ui.emptyProfileVideos
+                        ? []
+                        : [{ url: ui.playlistVideos[0].url, title: '<img src=x> Profile video' }],
+                    next_offset: 50,
+                    has_more: !ui.emptyProfileVideos && !args.offset,
+                };
             };
+            if (ui.holdProfileVideos) {
+                ui.holdProfileVideos = false;
+                return new Promise((resolve, reject) => {
+                    ui.releaseProfileVideos = () => {
+                        try {
+                            resolve(complete());
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                });
+            }
+            return complete();
         }
         if (command === 'get_history_social_insights') return structuredClone(ui.socialRecords[args.id] || null);
         if (command === 'load_history_social_insights') {
@@ -2230,6 +2261,9 @@ try {
             );
             assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.accountFetches), 0);
             assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.profileFetches), 0);
+            assert(await page.locator('#historyAccountOpenBtn').isDisabled());
+            assert(await page.locator('#historyAccountProfileHint').isVisible());
+            assert.match(await page.locator('#historyAccountVideosStateTitle').textContent(), /Discover more/);
             await page.waitForFunction(
                 () => !globalThis.document.querySelector('#historyAccountSocialLoadBtn').disabled
             );
@@ -2242,6 +2276,7 @@ try {
                         ...first,
                         id: `account-extra-${index}`,
                         title: `Saved account video ${index}`,
+                        filename: `${'Long filename with details '.repeat(12)}${index}.mp4`,
                     })),
                     { ...first, id: 'account-different-platform', source: 'tiktok' },
                     { ...first, id: 'account-similar-name', uploader: `${first.uploader} Extra` },
@@ -2256,7 +2291,7 @@ try {
             assert(await page.locator('#historyAccountView').isHidden());
             await page.locator('#historyDetailsAccountBtn').click();
             await page.waitForFunction(
-                () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 4
+                () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 2
             );
             assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.accountFetches), 1);
             assert.equal(await page.locator('#historyAccountSavedList button').count(), 20);
@@ -2265,10 +2300,50 @@ try {
                 () => globalThis.document.querySelector('#historyAccountSavedList').childElementCount === 27
             );
             assert(await page.locator('#historyAccountMoreSavedBtn').isHidden());
-            assert.match(await page.locator('#historyAccountSavedCount').textContent(), /^27 completed downloads/);
+            assert.equal(await page.locator('#historyAccountSavedCount').textContent(), '27');
             const accountMetrics = page.locator('#historyAccountSocialMetrics');
             assert.match(await accountMetrics.innerText(), /Subscribers[\s\S]*12[,.]345/);
             assert.match(await accountMetrics.innerText(), /Posts[\s\S]*0/);
+            assert(!(await accountMetrics.innerText().then(text => text.includes('—'))));
+            assert.equal(await accountMetrics.locator('.pinefetch-social-metric').count(), 2);
+            assert.equal(await page.locator('#historyAccountSocialUnavailableList dt').count(), 2);
+            await page.locator('#historyAccountSocialUnavailableSummary').focus();
+            await page.keyboard.press('Enter');
+            assert(await page.locator('#historyAccountSocialUnavailableList').isVisible());
+            assert(await page.locator('#historyAccountOpenBtn').isEnabled());
+            assert(await page.locator('#historyAccountProfileHint').isHidden());
+            await page.locator('#historyAccountOpenBtn').click();
+            const savedFile = page.locator('#historyAccountSavedList .pinefetch-account-filename').first();
+            assert.equal(await savedFile.getAttribute('title'), await savedFile.textContent());
+            const savedButton = page.locator('#historyAccountSavedList button').first();
+            assert.equal(await savedButton.getAttribute('aria-describedby'), await savedFile.getAttribute('id'));
+            assert.equal(await page.locator('#historyAccountOpenBtn').getAttribute('aria-describedby'), null);
+            await savedButton.hover();
+            assert(
+                await page
+                    .locator('#historyAccountSavedList li')
+                    .first()
+                    .evaluate(el => globalThis.getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)')
+            );
+            await savedButton.focus();
+            // macOS WebKit defaults to form-only Tab navigation; Option-Tab includes buttons.
+            await page.keyboard.press(engine.name() === 'webkit' ? 'Alt+Tab' : 'Tab');
+            const accountFocus = await page.evaluate(() => {
+                const active = globalThis.document.activeElement;
+                return {
+                    tag: active.tagName,
+                    label: active.getAttribute('aria-label'),
+                    classes: active.className,
+                    visible: active.matches(':focus-visible'),
+                    outline: globalThis.getComputedStyle(active).outlineStyle,
+                    inList: Boolean(active.closest('#historyAccountSavedList')),
+                };
+            });
+            assert(
+                accountFocus.inList && accountFocus.visible && accountFocus.outline !== 'none',
+                JSON.stringify(accountFocus)
+            );
+
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.failAccount = true;
             });
@@ -2282,24 +2357,106 @@ try {
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.failAccount = false;
             });
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.unavailableAccount = true;
+            });
+            await page.locator('#historyAccountSocialLoadBtn').click();
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#historyAccountSocialUnavailableList').childElementCount === 8
+            );
+            assert.equal(await accountMetrics.locator('.pinefetch-social-metric').count(), 0);
+            assert.match(await page.locator('#historyAccountSocialStatus').textContent(), /No public metrics/);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.unavailableAccount = false;
+            });
+            await page.locator('#historyAccountSocialLoadBtn').click();
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 2
+            );
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.holdProfileVideos = true;
+                globalThis.__pinefetchUi.emptyProfileVideos = true;
+            });
+            await page.locator('#historyAccountVideosBtn').click();
+            assert(await page.locator('#historyAccountVideosBtn').isDisabled());
+            assert.equal(await page.locator('#historyAccountRemoteList').getAttribute('aria-busy'), 'true');
+            assert(await page.locator('#historyAccountVideosLoading').isVisible());
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseProfileVideos());
+            await page.waitForFunction(
+                () =>
+                    globalThis.document.querySelector('#historyAccountVideosStateTitle').textContent ===
+                    'No public videos found'
+            );
+            assert(await page.locator('#historyAccountRemoteList').isHidden());
+            assert(await page.locator('#historyAccountVideosLoading').isHidden());
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.emptyProfileVideos = false;
+                globalThis.__pinefetchUi.failProfileVideos = true;
+            });
+            await page.locator('#historyAccountVideosBtn').click();
+            await page.waitForFunction(() =>
+                globalThis.document.querySelector('#historyAccountVideosStatus').classList.contains('oj-status-error')
+            );
+            assert.equal(await page.locator('#historyAccountVideosBtn').textContent(), 'Try again');
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failProfileVideos = false;
+            });
             await page.locator('#historyAccountVideosBtn').click();
             await page.locator('#historyAccountRemoteList button').waitFor();
             assert.equal(await page.locator('#historyAccountRemoteList img').count(), 0);
             await page.locator('#historyAccountMoreVideosBtn').click();
             assert.equal(await page.locator('#historyAccountRemoteList button').count(), 1);
             assert(await page.locator('#historyAccountMoreVideosBtn').isHidden());
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failProfileVideos = true;
+            });
+            await page.locator('#historyAccountVideosBtn').click();
+            await page.waitForFunction(() =>
+                globalThis.document
+                    .querySelector('#historyAccountVideosStatus')
+                    .textContent.includes('Previously loaded videos')
+            );
+            assert.equal(await page.locator('#historyAccountRemoteList button').count(), 1);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failProfileVideos = false;
+            });
             await page.locator('#historyAccountSavedList button').first().click();
             await page.locator('#historyDetailsContent').waitFor();
             assert.match(await page.locator('#historyDetailsBackBtn').textContent(), /Back to account/);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failAccountRead = true;
+            });
             await page.locator('#historyDetailsBackBtn').click();
+            await page.locator('#historyAccountRetryBtn').waitFor();
+            assert(
+                await page.locator('#historyAccountStatus').evaluate(el => el.classList.contains('oj-status-error'))
+            );
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failAccountRead = false;
+            });
+            await page.locator('#historyAccountRetryBtn').click();
             await page.locator('#historyAccountView').waitFor();
             await page.waitForFunction(
-                () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 4
+                () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 2
             );
             const accountViewport = page.viewportSize();
             await page.setViewportSize({ width: 390, height: 844 });
             assert(await page.evaluate(() => globalThis.document.documentElement.scrollWidth <= globalThis.innerWidth));
+            const clippedFile = page.locator('#historyAccountSavedList .pinefetch-account-filename').nth(2);
+            assert(
+                await clippedFile.evaluate(
+                    el => el.scrollWidth > el.clientWidth && globalThis.getComputedStyle(el).textOverflow === 'ellipsis'
+                )
+            );
+            await page.locator('#historyAccountSocialLoadBtn').scrollIntoViewIfNeeded();
+            assert(await page.locator('#historyAccountSocialLoadBtn').isVisible());
             await page.screenshot({ path: `/tmp/pinefetch-account-${engine.name()}.png` });
+            for (const width of [620, 800, 1000]) {
+                await page.setViewportSize({ width, height: 800 });
+                assert(
+                    await page.evaluate(() => globalThis.document.documentElement.scrollWidth <= globalThis.innerWidth)
+                );
+            }
             await page.setViewportSize(accountViewport);
             await page.locator('#historyAccountVideosBtn').click();
             await page.locator('#historyAccountRemoteList button').click();

@@ -1211,11 +1211,6 @@ body {
     background: var(--oj-surface);
 }
 
-.pinefetch-account-body {
-    min-height: 0;
-    flex: 1;
-    padding-right: var(--oj-space-2);
-}
 .pinefetch-details-byline {
     display: flex;
     flex-wrap: wrap;
@@ -1234,21 +1229,289 @@ body {
     overflow-wrap: anywhere;
     color: var(--oj-accent);
 }
-.pinefetch-account-video {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    width: 100%;
-    gap: var(--oj-space-1);
-    color: inherit;
-    text-align: left;
+/* Account details reuse OJ surfaces, controls, typography and spacing. */
+.pinefetch-account-view {
+    gap: var(--oj-space-3);
+}
+.pinefetch-account-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 19rem);
+    align-items: center;
+    gap: var(--oj-space-4);
+    padding-block-end: var(--oj-space-4);
+    border-block-end: 1px solid var(--oj-border);
+}
+.pinefetch-account-header h2 {
+    margin: 0;
     overflow-wrap: anywhere;
 }
-
-#historyAccountSavedList,
-#historyAccountRemoteList {
-    max-height: 35vh;
+.pinefetch-account-byline {
+    gap: var(--oj-space-2);
+    margin-block-end: var(--oj-space-1);
+}
+.pinefetch-account-profile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--oj-space-2);
+    text-align: end;
+}
+.pinefetch-account-notice:has([hidden]):not(:has(:not([hidden]))) {
+    display: none;
+}
+.pinefetch-account-notice {
+    gap: var(--oj-space-2);
+}
+.pinefetch-account-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.8fr) minmax(16rem, 1fr);
+    align-items: start;
+    gap: var(--oj-space-4);
+    min-height: 0;
+    flex: 1;
+    padding-inline-end: var(--oj-space-1);
+}
+.pinefetch-account-main,
+.pinefetch-account-section {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: var(--oj-space-3);
+}
+.pinefetch-account-main {
+    gap: var(--oj-space-5);
+}
+.pinefetch-account-section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--oj-space-2);
+}
+.pinefetch-account-section-heading h3 {
+    margin: 0;
+}
+.pinefetch-account-section-heading .oj-inline {
+    gap: var(--oj-space-2);
+}
+.pinefetch-account-section > .oj-button {
+    align-self: flex-start;
+}
+.pinefetch-account-video-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    max-height: min(27rem, 48vh);
     overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--oj-border);
+    border-radius: var(--oj-radius-md);
+    scrollbar-gutter: stable;
+}
+.pinefetch-account-video-list:empty {
+    display: none;
+}
+.pinefetch-account-video {
+    display: grid;
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    align-items: center;
+    gap: var(--oj-space-3);
+    padding-inline: var(--oj-space-3);
+    color: var(--oj-text);
+}
+.pinefetch-account-video + .pinefetch-account-video {
+    border-block-start: 1px solid var(--oj-border);
+}
+.pinefetch-account-video:has(.pinefetch-account-video-button:enabled:hover),
+.pinefetch-account-video:has(.pinefetch-account-video-button:focus-visible) {
+    background: var(--oj-surface-hover);
+}
+.pinefetch-account-filetype {
+    justify-self: start;
+    max-width: 100%;
+    padding-inline: var(--oj-space-2);
+    font-family: var(--oj-font-mono);
+    font-size: var(--oj-text-xs);
+}
+.pinefetch-account-video-button {
+    display: flex;
+    align-items: center;
+    gap: var(--oj-space-3);
+    min-width: 0;
+    min-height: 3.75rem;
+    width: 100%;
+    padding: var(--oj-space-2) 0;
+    border: 0;
+    border-radius: var(--oj-radius-sm);
+    background: transparent;
+    color: inherit;
+    text-align: start;
+    font: inherit;
+    cursor: pointer;
+}
+.pinefetch-account-video-button:focus-visible {
+    outline: 2px solid var(--oj-accent);
+    outline-offset: -2px;
+}
+.pinefetch-account-video-button:disabled {
+    color: var(--oj-text-disabled);
+    cursor: not-allowed;
+}
+.pinefetch-account-video-content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--oj-space-1);
+    min-width: 0;
+}
+.pinefetch-account-video-title {
+    display: block;
+    font-size: var(--oj-text-sm);
+    font-weight: var(--oj-weight-semibold);
+}
+.pinefetch-account-filename {
+    display: block;
+    color: var(--oj-text-muted);
+}
+.pinefetch-account-row-action {
+    display: inline-flex;
     flex: none;
-    padding-right: var(--oj-space-2);
+    align-items: center;
+    gap: var(--oj-space-2);
+    color: var(--oj-text-muted);
+    font-size: var(--oj-text-xs);
+}
+.pinefetch-account-video-button:enabled:is(:hover, :focus-visible) .pinefetch-account-row-action {
+    color: var(--oj-accent-text);
+}
+.pinefetch-account-insights {
+    gap: var(--oj-space-3);
+}
+.pinefetch-account-insights .pinefetch-social-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--oj-space-2);
+    margin: 0;
+}
+.pinefetch-account-insights .pinefetch-social-metric {
+    padding: var(--oj-space-3);
+}
+.pinefetch-account-insights .pinefetch-social-grid:empty {
+    display: none;
+}
+.pinefetch-account-insights .pinefetch-social-metric p {
+    margin: 0;
+}
+.pinefetch-account-insights .pinefetch-social-metric .oj-helper {
+    font-size: var(--oj-text-xs);
+}
+.pinefetch-account-insights .pinefetch-social-metric h3 {
+    margin-block-end: var(--oj-space-1);
+}
+.pinefetch-account-insights #historyAccountSocialResults {
+    gap: var(--oj-space-3);
+}
+.pinefetch-account-insights #historyAccountSocialLoadBtn {
+    width: 100%;
+}
+.pinefetch-account-unavailable summary {
+    padding: var(--oj-space-2) var(--oj-space-3);
+    font-size: var(--oj-text-xs);
+}
+.pinefetch-account-unavailable dl {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+    gap: var(--oj-space-2);
+    margin: 0;
+    padding: var(--oj-space-3);
+    font-size: var(--oj-text-xs);
+    overflow-wrap: anywhere;
+}
+.pinefetch-account-unavailable dt {
+    color: var(--oj-text-soft);
+}
+.pinefetch-account-unavailable dd {
+    margin: 0;
+    color: var(--oj-text-muted);
+}
+.pinefetch-account-discovery {
+    background: var(--oj-bg-elevated);
+}
+.pinefetch-account-empty {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: var(--oj-space-3);
+    padding: var(--oj-space-3);
+    border: 1px dashed var(--oj-border-strong);
+    border-radius: var(--oj-radius-md);
+    color: var(--oj-text-muted);
+}
+.pinefetch-account-empty h4 {
+    margin: 0 0 var(--oj-space-1);
+    color: var(--oj-text-soft);
+}
+.pinefetch-account-empty > i {
+    margin-block-start: var(--oj-space-1);
+}
+.pinefetch-account-skeletons {
+    grid-column: 2;
+    display: grid;
+    gap: var(--oj-space-2);
+}
+.pinefetch-account-skeletons .oj-skeleton {
+    min-height: var(--oj-space-5);
+}
+.pinefetch-account-skeletons .oj-skeleton:last-child {
+    width: 65%;
+}
+@media (max-width: 900px) {
+    .pinefetch-account-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .pinefetch-account-insights .pinefetch-social-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+@media (max-width: 620px) {
+    .pinefetch-account-header {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--oj-space-3);
+    }
+    .pinefetch-account-profile {
+        align-items: flex-start;
+        text-align: start;
+    }
+    .pinefetch-account-profile .oj-button {
+        width: 100%;
+    }
+    .pinefetch-account-insights .pinefetch-social-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .pinefetch-account-video {
+        grid-template-columns: 2.75rem minmax(0, 1fr);
+        gap: var(--oj-space-2);
+        padding-inline: var(--oj-space-2);
+    }
+    .pinefetch-account-row-action {
+        align-self: flex-start;
+        margin-block-start: var(--oj-space-1);
+    }
+    .pinefetch-account-row-action i {
+        display: none;
+    }
+    .pinefetch-account-video-title {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        white-space: normal;
+    }
+    .pinefetch-account-video-list {
+        max-height: 22rem;
+    }
+    .pinefetch-account-section-heading > .oj-button {
+        flex-grow: 1;
+    }
 }

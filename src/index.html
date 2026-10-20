@@ -599,89 +599,181 @@
                 </section>
                 <section
                     id="historyAccountView"
-                    class="oj-panel pinefetch-panel pinefetch-history-details-view"
+                    class="oj-panel pinefetch-panel pinefetch-history-details-view pinefetch-account-view"
                     aria-labelledby="historyAccountTitle"
                     hidden
                 >
                     <button
                         id="historyAccountBackBtn"
-                        class="oj-button oj-button-ghost pinefetch-history-back"
+                        class="oj-button oj-button-ghost oj-button-compact pinefetch-history-back"
                         type="button"
                     >
                         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to video
                     </button>
-                    <header class="oj-section-header">
+                    <header class="pinefetch-account-header">
                         <div class="pinefetch-panel-heading">
-                            <h2 id="historyAccountTitle" class="oj-heading-2" tabindex="-1">Account</h2>
-                            <p id="historyAccountMeta" class="oj-muted"></p>
-                        </div>
-                        <button id="historyAccountOpenBtn" class="oj-button oj-button-ghost" type="button" hidden>
-                            Open profile in Browser
-                        </button>
-                    </header>
-                    <div class="oj-scroll-area oj-stack pinefetch-account-body">
-                        <p id="historyAccountStatus" class="oj-status" role="status" aria-live="polite"></p>
-                        <section class="oj-stack" aria-labelledby="historyAccountSavedTitle">
-                            <h3 id="historyAccountSavedTitle" class="oj-heading-3">Downloaded videos</h3>
-                            <p id="historyAccountSavedCount" class="oj-helper"></p>
-                            <div id="historyAccountSavedList" class="pinefetch-history-list"></div>
-                            <button
-                                id="historyAccountMoreSavedBtn"
-                                class="oj-button oj-button-secondary"
-                                type="button"
-                                hidden
-                            >
-                                Load more saved videos
-                            </button>
-                        </section>
-                        <section class="oj-stack" aria-labelledby="historyAccountSocialTitle">
-                            <div class="pinefetch-history-content-toolbar">
-                                <h3 id="historyAccountSocialTitle" class="oj-heading-3">Account Social Insights</h3>
-                                <button
-                                    id="historyAccountSocialLoadBtn"
-                                    class="oj-button oj-button-primary"
-                                    type="button"
-                                >
-                                    Load Social Insights
-                                </button>
+                            <div class="oj-inline pinefetch-account-byline">
+                                <span id="historyAccountMeta" class="oj-badge"></span
+                                ><span class="oj-caption">Account</span>
                             </div>
-                            <div id="historyAccountSocialResults">
+                            <h2 id="historyAccountTitle" class="oj-heading-2" tabindex="-1">Account</h2>
+                            <p id="historyAccountSummary" class="oj-helper"></p>
+                        </div>
+                        <div class="pinefetch-account-profile">
+                            <button
+                                id="historyAccountOpenBtn"
+                                class="oj-button oj-button-secondary oj-button-compact"
+                                type="button"
+                                aria-describedby="historyAccountProfileHint"
+                                disabled
+                            >
+                                <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> Open profile
+                            </button>
+                            <p id="historyAccountProfileHint" class="oj-helper">
+                                Load insights or browse videos to find the profile link.
+                            </p>
+                        </div>
+                    </header>
+                    <div class="oj-inline pinefetch-account-notice">
+                        <p id="historyAccountStatus" class="oj-status" role="status" aria-live="polite" hidden></p>
+                        <button
+                            id="historyAccountRetryBtn"
+                            class="oj-button oj-button-secondary oj-button-compact"
+                            type="button"
+                            hidden
+                        >
+                            Try again
+                        </button>
+                    </div>
+                    <div class="oj-scroll-area pinefetch-account-body">
+                        <div class="pinefetch-account-main">
+                            <section class="pinefetch-account-section" aria-labelledby="historyAccountSavedTitle">
+                                <header class="pinefetch-account-section-heading">
+                                    <div class="oj-inline">
+                                        <h3 id="historyAccountSavedTitle" class="oj-heading-3">Downloaded videos</h3>
+                                        <span
+                                            id="historyAccountSavedCount"
+                                            class="oj-badge oj-mono"
+                                            aria-label="Saved downloads"
+                                        ></span>
+                                    </div>
+                                    <span class="oj-caption">Saved in History</span>
+                                </header>
+                                <ul
+                                    id="historyAccountSavedList"
+                                    class="pinefetch-account-video-list"
+                                    aria-label="Downloaded videos"
+                                ></ul>
+                                <p id="historyAccountSavedEmpty" class="oj-helper" hidden>
+                                    No saved downloads were found for this account.
+                                </p>
+                                <button
+                                    id="historyAccountMoreSavedBtn"
+                                    class="oj-button oj-button-secondary oj-button-compact"
+                                    type="button"
+                                    hidden
+                                >
+                                    Load more saved videos
+                                </button>
+                            </section>
+                            <section
+                                class="oj-panel oj-panel-compact pinefetch-account-section pinefetch-account-discovery"
+                                aria-labelledby="historyAccountRemoteTitle"
+                            >
+                                <header class="pinefetch-account-section-heading">
+                                    <div>
+                                        <h3 id="historyAccountRemoteTitle" class="oj-heading-3">More videos</h3>
+                                        <p class="oj-helper">Browse this account’s public profile.</p>
+                                    </div>
+                                    <button
+                                        id="historyAccountVideosBtn"
+                                        class="oj-button oj-button-secondary oj-button-compact"
+                                        type="button"
+                                    >
+                                        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Browse videos
+                                    </button>
+                                </header>
+                                <p
+                                    id="historyAccountVideosStatus"
+                                    class="oj-status"
+                                    role="status"
+                                    aria-live="polite"
+                                    hidden
+                                ></p>
+                                <div id="historyAccountVideosPlaceholder" class="pinefetch-account-empty">
+                                    <i
+                                        id="historyAccountVideosIcon"
+                                        class="fa-solid fa-cloud-arrow-down"
+                                        aria-hidden="true"
+                                    ></i>
+                                    <div>
+                                        <h4 id="historyAccountVideosStateTitle" class="oj-label">
+                                            Discover more from this account
+                                        </h4>
+                                        <p id="historyAccountVideosStateDescription" class="oj-helper">
+                                            Browse public videos, then choose one to prepare a download. Your History
+                                            stays unchanged.
+                                        </p>
+                                    </div>
+                                    <div
+                                        id="historyAccountVideosLoading"
+                                        class="pinefetch-account-skeletons"
+                                        aria-hidden="true"
+                                        hidden
+                                    >
+                                        <span class="oj-skeleton"></span><span class="oj-skeleton"></span
+                                        ><span class="oj-skeleton"></span>
+                                    </div>
+                                </div>
+                                <ul
+                                    id="historyAccountRemoteList"
+                                    class="pinefetch-account-video-list"
+                                    aria-label="Public profile videos"
+                                ></ul>
+                                <p id="historyAccountVideosHint" class="oj-helper" hidden>
+                                    Choose a video to prepare its download.
+                                </p>
+                                <button
+                                    id="historyAccountMoreVideosBtn"
+                                    class="oj-button oj-button-secondary oj-button-compact"
+                                    type="button"
+                                    hidden
+                                >
+                                    Load more videos
+                                </button>
+                            </section>
+                        </div>
+                        <section
+                            class="oj-panel oj-panel-compact pinefetch-account-section pinefetch-account-insights"
+                            aria-labelledby="historyAccountSocialTitle"
+                        >
+                            <header class="pinefetch-account-section-heading">
+                                <h3 id="historyAccountSocialTitle" class="oj-heading-3">Social Insights</h3>
+                            </header>
+                            <div id="historyAccountSocialResults" class="oj-stack">
                                 <p
                                     id="historyAccountSocialStatus"
                                     class="oj-status"
                                     role="status"
                                     aria-live="polite"
                                 ></p>
-                                <p id="historyAccountSocialMeta" class="oj-helper"></p>
                                 <div id="historyAccountSocialMetrics" class="pinefetch-social-grid"></div>
-                            </div>
-                        </section>
-                        <section class="oj-stack" aria-labelledby="historyAccountRemoteTitle">
-                            <div class="pinefetch-history-content-toolbar">
-                                <h3 id="historyAccountRemoteTitle" class="oj-heading-3">
-                                    More videos from this account
-                                </h3>
-                                <button
-                                    id="historyAccountVideosBtn"
-                                    class="oj-button oj-button-secondary"
-                                    type="button"
+                                <p id="historyAccountSocialMeta" class="oj-helper"></p>
+                                <details
+                                    id="historyAccountSocialUnavailable"
+                                    class="oj-accordion pinefetch-account-unavailable"
+                                    hidden
                                 >
-                                    Load profile videos
-                                </button>
+                                    <summary id="historyAccountSocialUnavailableSummary">Unavailable metrics</summary>
+                                    <dl id="historyAccountSocialUnavailableList" class="oj-accordion-body"></dl>
+                                </details>
                             </div>
-                            <p class="oj-helper">
-                                Load publicly accessible videos from the profile. Availability depends on the platform.
-                                Choose a video to prepare its download.
-                            </p>
-                            <p id="historyAccountVideosStatus" class="oj-status" role="status" aria-live="polite"></p>
-                            <div id="historyAccountRemoteList" class="pinefetch-history-list"></div>
                             <button
-                                id="historyAccountMoreVideosBtn"
-                                class="oj-button oj-button-secondary"
+                                id="historyAccountSocialLoadBtn"
+                                class="oj-button oj-button-primary oj-button-compact"
                                 type="button"
-                                hidden
                             >
-                                Load more profile videos
+                                Load Social Insights
                             </button>
                         </section>
                     </div>
