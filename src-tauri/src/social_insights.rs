@@ -228,10 +228,15 @@ pub(crate) fn fetch_url(
         command,
         None,
         Some(processes),
-        Some(Duration::from_secs(35)),
+        Some(Duration::from_secs(90)),
     )
     .map_err(String::from)?;
     if !output.status.success() {
+        if String::from_utf8_lossy(&output.stderr)
+            .contains("The bundled Social Insights browser runtime is unavailable.")
+        {
+            return Err("The bundled Social Insights browser runtime is unavailable. Rebuild or reinstall PineFetch.".into());
+        }
         return Err(
             "Social Insights could not be fetched. Check your connection and try again.".into(),
         );
@@ -435,6 +440,16 @@ mod tests {
                 .contains("already loading")
         );
         state.active.lock().unwrap().clear();
+        fs::write(&node, "#!/bin/sh\nprintf '%s' 'The bundled Social Insights browser runtime is unavailable. Rebuild or reinstall PineFetch.' >&2\nexit 1\n").unwrap();
+        assert!(
+            fetch(&db, &state, &ProcessState::default(), "video", &tools)
+                .unwrap_err()
+                .contains("Rebuild or reinstall")
+        );
+        assert_eq!(
+            get(&db, "video").unwrap().unwrap().fetched_at,
+            saved.fetched_at
+        );
         for body in [
             "exit 1",
             "printf 'not json'",

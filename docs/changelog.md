@@ -1,4 +1,6 @@
-# 2.4.1
+# 2.5.0
+
+- Switched video and account Social Insights to Fetchary browser mode with bundled headless Chromium and isolated temporary profiles.
 
 - Added an Account view from History video details, with paginated saved videos, explicit Fetchary account Social Insights saved in SQLite, and publicly accessible profile videos that can be opened in the download composer.
 - Renamed History's source totals to “Downloads by platform” and added the same platform breakdown to `PineFetch stats`.

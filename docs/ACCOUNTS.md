@@ -16,7 +16,8 @@ from a display name.
 
 **Load Social Insights** resolves the selected video's public `channel_url` or
 `uploader_url` through yt-dlp, validates that it is a profile on that platform,
-then requests public account metrics using Fetchary's library. Refresh is
+then renders the public account page using Fetchary's **browser mode** and
+bundled headless Chromium to extract its metrics. Refresh is
 explicit. Available values, zeroes and missing reasons are displayed using the
 same cards as video Social Insights. Account cards focus on followers, following,
 posts and subscribers, show other metrics when available, and put available counts first. YouTube account insights have Fetchary's
@@ -25,7 +26,8 @@ posts and subscribers, show other metrics when available, and put available coun
 Opening an account only reads SQLite. Saved snapshots remain readable offline
 and after restarting PineFetch. A failed request, failed write or changed/deleted
 History entry preserves previous snapshots. The native process has the existing
-90-second metadata deadline and 35-second Fetchary deadline. No cookies, HTML,
+90-second metadata deadline and 90-second Fetchary process deadline, including
+browser startup, navigation and a 5-second post-load wait. No cookies, HTML,
 credentials or Fetchary CLI history are stored.
 
 **Load profile videos** separately requests up to 50 public video references at

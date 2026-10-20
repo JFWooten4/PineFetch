@@ -45,7 +45,7 @@ pub(crate) fn resolve_social_insights_tools(
         {
             let node = directory.join(if cfg!(windows) { "node.exe" } else { "node" });
             let script = directory.join("social-insights.cjs");
-            if node.is_file() && script.is_file() {
+            if node.is_file() && script.is_file() && directory.join("browser.json").is_file() {
                 return Ok(crate::social_insights::SocialInsightsTools { node, script });
             }
         }

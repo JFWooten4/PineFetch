@@ -12,13 +12,17 @@ test('Fetchary library extracts only matching public video metrics and preserves
     let requests = 0;
     const result = await loadSocialInsights(url, (target, options) => {
         assert.equal(target, url);
-        assert.equal(options.mode, 'http');
+        assert.equal(options.mode, 'browser');
+        assert.equal(options.waitAfterLoad, 5000);
+        assert.equal(typeof options.launchBrowser, 'function');
         assert.equal(options.cacheTtlMs, 0);
         assert.equal(options.timeout, 20000);
         assert.equal(options.cookiesFromBrowser, undefined);
         assert.equal(options.session, undefined);
         return extractSocialInsights(target, {
             ...options,
+            // Keep parser fixtures transport-only; the browser integration suite renders JS.
+            mode: 'http',
             lookup: async () => [{ address: '93.184.216.34', family: 4 }],
             fetch: async () => {
                 requests++;
@@ -58,6 +62,8 @@ test('the same Fetchary adapter extracts account metrics with channel identity, 
     const result = await loadSocialInsights(target, (url, options) =>
         extractSocialInsights(url, {
             ...options,
+            // Keep parser fixtures transport-only; the browser integration suite renders JS.
+            mode: 'http',
             lookup: async () => [{ address: '93.184.216.34', family: 4 }],
             fetch: async () => new Response(html, { headers: { 'content-type': 'text/html' } }),
         })

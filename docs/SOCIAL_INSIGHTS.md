@@ -21,19 +21,22 @@ with the stored snapshot. These are saved snapshots, not continuously live count
 ## Fetchary integration
 
 `native/social-insights.cjs` calls the **Fetchary library**, pinned in npm's
-lockfile. It uses HTTP mode with a 20-second request timeout, an 8 MiB page limit
-and `cacheTtlMs: 0`. Each deliberate refresh performs a fresh capture. Fetchary
+lockfile. It explicitly uses **browser mode**, a 20-second per-phase timeout,
+a 5-second post-load wait, a 64 MiB page/resource limit and `cacheTtlMs: 0`. Each deliberate refresh performs a fresh capture. Fetchary
 owns platform recognition, public-page extraction, redirect/identity checks and
 private-network restrictions. PineFetch does not duplicate its platform parsers.
 
-This integration uses publicly exposed HTTP data. It does not launch Chromium,
-read browser cookies or import a signed-in session. Script-rendered, hidden and
-private metrics may therefore be unavailable. Unsupported URL/platform kinds
+Each explicit load renders the public page in bundled headless Chromium, including
+JavaScript and supported consent-overlay handling. Chromium uses a fresh temporary
+profile, which is removed after the capture. It does not read personal browser
+cookies or import a signed-in session. Hidden and private metrics may remain unavailable. Unsupported URL/platform kinds
 are reported as unsupported. Network failures, blocked access, login requirements,
 invalid replies and failed SQLite writes preserve the previous snapshot.
 
-Node 26.10.0 and the locked production dependencies are bundled with the app;
-end users do not need a Node or Fetchary installation. The Node macOS binary
+Node 26.10.0, the locked production dependencies and the Chromium headless shell
+revision pinned by Puppeteer are bundled with the app; end users do not need
+Node, Fetchary or an installed browser. Online extraction requires the bundled
+Chromium runtime and its platform system libraries. The Node macOS binary
 requires **macOS 13.5 or newer** for online Social Insights extraction. The app's
 other features and reading saved snapshots retain their existing requirements.
 Windows/Linux runtime preparation is implemented for native arm64/x64 hosts;
@@ -41,8 +44,10 @@ those app builds were not validated in this macOS workspace.
 
 `npm run prepare:social-runtime` downloads Node's official archive, verifies its
 SHA-256 against the versioned official checksum list, installs locked production
-dependencies with lifecycle scripts disabled, and checks the library. No Chromium
-is downloaded. Preparation is wired into Tauri dev/build and `build:check`.
+dependencies with lifecycle scripts disabled, explicitly downloads the pinned
+Chromium headless shell into app resources, and verifies JavaScript rendering.
+A second smoke test checks the relocated runtime before the previous runtime
+is removed. Preparation is wired into Tauri dev/build and `build:check`.
 Input fingerprints allow reuse; a failed preparation preserves the prior valid
 runtime. Generated files are ignored by Git and the Tauri watcher. The adapter
 runs from bundled resources, independently of PATH and the working directory.
@@ -69,15 +74,18 @@ cascades to the snapshot. Fetching does not modify the video, transcript or OCR.
 
 `get_history_social_insights` is a SQLite-only read.
 `load_history_social_insights` is the explicit network-and-save action. The native
-command runs off the UI thread, has a 35-second outer process deadline, rejects
+command runs off the UI thread, has a 90-second outer process deadline, rejects
 concurrent requests for the same entry and uses the existing app-exit process
-cleanup. There is no automatic collection at download completion or app startup.
+cleanup. On macOS/Linux, Chromium stays in the utility process group so native timeout/app-exit
+cleanup terminates its child processes as well. There is no automatic collection at download completion or app startup.
 
 ## Validation
 
 ```sh
 npm run check
 npm run test:ui
+npm run prepare:social-runtime
+npm run test:social-browser
 npm run build:check
 ```
 

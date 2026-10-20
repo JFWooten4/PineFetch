@@ -1,6 +1,6 @@
 {
     "name": "pinefetch",
-    "version": "2.4.1",
+    "version": "2.5.0",
     "scripts": {
         "check": "npm run check:versions && npm run lint && npm run format:check && npm test",
         "check:versions": "node scripts/check-versions.mjs",
@@ -37,7 +37,8 @@
         "test:fast": "npm run test:js && npm run test:rust:fast",
         "test:integration": "npm run test:rust:integration",
         "postinstall": "npm run sync:design-system",
-        "sync:design-system": "node scripts/sync-design-system.mjs"
+        "sync:design-system": "node scripts/sync-design-system.mjs",
+        "test:social-browser": "node --test --test-timeout=60000 test/social-browser.integration.mjs"
     },
     "engines": {
         "node": "26.10.0"
@@ -68,7 +69,9 @@
     },
     "homepage": "https://oliverjessner.at/pinefetch",
     "dependencies": {
+        "@puppeteer/browsers": "3.2.5",
         "fetchary": "2.0.4",
-        "oj-designsystem": "0.1.0"
+        "oj-designsystem": "0.1.0",
+        "puppeteer-core": "25.14.0"
     }
 }
