@@ -13,8 +13,17 @@ pub(crate) fn load_info_with_yt_dlp(
     url: String,
     state: &crate::process::ProcessState,
 ) -> Result<InfoResponse, String> {
-    let mut command = Command::new(&yt_dlp);
-    command.args(build_info_args(&url, deno.as_deref()));
+    parse_info_json(&load_raw_info(&yt_dlp, deno.as_deref(), &url, state)?)
+}
+
+pub(crate) fn load_raw_info(
+    yt_dlp: &str,
+    deno: Option<&str>,
+    url: &str,
+    state: &crate::process::ProcessState,
+) -> Result<String, String> {
+    let mut command = Command::new(yt_dlp);
+    command.args(build_info_args(url, deno));
     let output = run_command_output(command, None, Some(state), Some(INFO_TIMEOUT))
         .map_err(|e| format!("Failed to run yt-dlp: {e}"))?;
 
@@ -25,5 +34,5 @@ pub(crate) fn load_info_with_yt_dlp(
     }
 
     let raw = String::from_utf8_lossy(&output.stdout).to_string();
-    parse_info_json(&raw)
+    Ok(raw)
 }

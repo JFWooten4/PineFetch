@@ -1210,3 +1210,45 @@ body {
 .pinefetch-keywords-table thead {
     background: var(--oj-surface);
 }
+
+.pinefetch-account-body {
+    min-height: 0;
+    flex: 1;
+    padding-right: var(--oj-space-2);
+}
+.pinefetch-details-byline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--oj-space-2);
+}
+.pinefetch-account-link {
+    min-height: 0;
+    line-height: inherit;
+    justify-content: flex-start;
+    width: fit-content;
+    max-width: 100%;
+    padding: 0;
+    white-space: normal;
+    text-align: left;
+    overflow-wrap: anywhere;
+    color: var(--oj-accent);
+}
+.pinefetch-account-video {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    gap: var(--oj-space-1);
+    color: inherit;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+#historyAccountSavedList,
+#historyAccountRemoteList {
+    max-height: 35vh;
+    overflow-y: auto;
+    flex: none;
+    padding-right: var(--oj-space-2);
+}

@@ -255,12 +255,30 @@ fn format_stats(stats: &HistoryStats) -> String {
     } else {
         format!("{}m {:02}s", seconds / 60, seconds % 60)
     };
-    format!(
+    let mut output = format!(
         "Downloaded videos: {}\nTotal data: {}\nTotal runtime: {}",
         stats.video_count,
         format_size(stats.total_file_size_bytes),
         duration
-    )
+    );
+    if !stats.source_counts.is_empty() {
+        output.push_str("\nDownloads by platform:");
+        for count in &stats.source_counts {
+            let label = match count.source.as_str() {
+                "youtube" => "YouTube",
+                "tiktok" => "TikTok",
+                "instagram" => "Instagram",
+                "facebook" => "Facebook",
+                "x" | "twitter" => "X",
+                "reddit" => "Reddit",
+                "twitch" => "Twitch",
+                "unknown" => "Unknown",
+                other => other,
+            };
+            output.push_str(&format!("\n{label}: {}", count.count));
+        }
+    }
+    output
 }
 
 fn execute(app: &AppHandle, command: CliCommand) -> Result<String, String> {
@@ -940,9 +958,29 @@ mod tests {
         );
         assert_eq!(
             format_stats(&get_history_stats_from_db(&state.db).unwrap()),
-            "Downloaded videos: 30\nTotal data: 30.0 KB\nTotal runtime: 30m 00s"
+            "Downloaded videos: 30\nTotal data: 30.0 KB\nTotal runtime: 30m 00s\nDownloads by platform:\nexample: 30"
         );
         assert_eq!(count_history_entries_in_db(&state.db).unwrap(), 30);
+    }
+
+    #[test]
+    fn platform_stats_report_the_same_source_totals_as_history() {
+        let stats = HistoryStats {
+            video_count: 8,
+            total_duration_seconds: 0,
+            total_file_size_bytes: 0,
+            source_counts: vec![
+                crate::models::HistorySourceCount {
+                    source: "tiktok".into(),
+                    count: 5,
+                },
+                crate::models::HistorySourceCount {
+                    source: "youtube".into(),
+                    count: 3,
+                },
+            ],
+        };
+        assert_eq!(format_stats(&stats), "Downloaded videos: 8\nTotal data: 0 B\nTotal runtime: 0m 00s\nDownloads by platform:\nTikTok: 5\nYouTube: 3");
     }
 
     #[test]

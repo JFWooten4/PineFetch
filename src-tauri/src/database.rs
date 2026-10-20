@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
-pub(super) const SCHEMA_VERSION: i64 = 5;
+pub(super) const SCHEMA_VERSION: i64 = 6;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 // The reported upgraded layout retains this stronger, compatible constraint.
 const LEGACY_HISTORY_VERSION: &str = "2.1.0";
@@ -99,6 +99,19 @@ CREATE TABLE history_social_insights (
     payload_json TEXT NOT NULL CHECK (length(payload_json) <= 262144),
     FOREIGN KEY (history_entry_id) REFERENCES history_entries(id) ON DELETE CASCADE
 );
+"#;
+
+const ACCOUNT_INSIGHTS_SQL: &str = r#"
+CREATE TABLE history_account_insights (
+    source TEXT NOT NULL,
+    uploader TEXT NOT NULL,
+    profile_url TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL CHECK (fetched_at >= 0),
+    fetchary_version TEXT NOT NULL,
+    payload_json TEXT NOT NULL CHECK (length(payload_json) <= 262144),
+    PRIMARY KEY (source, uploader)
+);
+CREATE INDEX idx_history_account_lookup ON history_entries(source, uploader);
 "#;
 
 pub(super) fn open(path: &Path) -> Result<Connection, String> {
@@ -198,6 +211,7 @@ pub(super) enum MigrationPoint {
     Ocr,
     OcrFrames,
     SocialInsights,
+    AccountInsights,
 }
 
 pub(super) fn initialize_with_hook(
@@ -287,6 +301,13 @@ pub(super) fn initialize_with_hook(
         tx.pragma_update(None, "user_version", 5)
             .map_err(|e| e.to_string())?;
         hook(MigrationPoint::SocialInsights)?;
+    }
+    if version < 6 {
+        tx.execute_batch(ACCOUNT_INSIGHTS_SQL)
+            .map_err(|e| format!("SQLite migration 6 failed: {e}"))?;
+        tx.pragma_update(None, "user_version", 6)
+            .map_err(|e| e.to_string())?;
+        hook(MigrationPoint::AccountInsights)?;
     }
     if check_version(&tx)? != SCHEMA_VERSION {
         return Err(
@@ -462,6 +483,11 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
             .execute_batch(SOCIAL_INSIGHTS_SQL)
             .map_err(|e| e.to_string())?;
     }
+    if version >= 6 {
+        reference
+            .execute_batch(ACCOUNT_INSIGHTS_SQL)
+            .map_err(|e| e.to_string())?;
+    }
     reference
         .execute_batch("CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
         .map_err(|e| e.to_string())?;
@@ -513,6 +539,12 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
         if version >= 5 && !tables.contains("history_social_insights") {
             return Err(
                 "Inconsistent schema 5: missing history_social_insights; database preserved".into(),
+            );
+        }
+        if version >= 6 && !tables.contains("history_account_insights") {
+            return Err(
+                "Inconsistent schema 6: missing history_account_insights; database preserved"
+                    .into(),
             );
         }
     } else if (tables.contains("captions") || tables.contains("transcriptions"))
@@ -651,9 +683,11 @@ fn validate_layout(conn: &Connection, version: i64) -> Result<(), String> {
         {
             return Err(format!("{} (OCR frame constraints)", fail()));
         }
-        if table == "history_social_insights"
-            && (!canonical.contains("check(fetched_at>=0)")
-                || !canonical.contains("check(length(payload_json)<=262144)"))
+        if matches!(
+            table.as_str(),
+            "history_social_insights" | "history_account_insights"
+        ) && (!canonical.contains("check(fetched_at>=0)")
+            || !canonical.contains("check(length(payload_json)<=262144)"))
         {
             return Err(format!("{} (Social Insights constraints)", fail()));
         }

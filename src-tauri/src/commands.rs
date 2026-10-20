@@ -629,3 +629,58 @@ pub(crate) fn restart_link_dump_server(
 ) -> Result<LinkDumpServerStatus, String> {
     restart_link_dump_server_internal(&app, state.inner())
 }
+
+#[tauri::command]
+pub(crate) fn get_history_account(
+    state: State<AppState>,
+    id: String,
+    offset: Option<u32>,
+) -> Result<crate::accounts::AccountPage, String> {
+    crate::accounts::get(&state.db, &id, offset.unwrap_or(0))
+}
+#[tauri::command]
+pub(crate) async fn load_history_account_insights(
+    app: AppHandle,
+    id: String,
+) -> Result<crate::accounts::AccountSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let yt_dlp = resolve_yt_dlp(&app, &state.config)?;
+        let deno = resolve_deno_executable(&app);
+        let tools = crate::runtime::resolve_social_insights_tools(&app)?;
+        crate::accounts::fetch_insights(
+            &state.db,
+            &state.accounts,
+            &state.processes,
+            &id,
+            &tools,
+            &yt_dlp,
+            deno.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Account request failed: {e}"))?
+}
+#[tauri::command]
+pub(crate) async fn load_history_account_videos(
+    app: AppHandle,
+    id: String,
+    offset: Option<u32>,
+) -> Result<crate::accounts::ProfileVideos, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let yt_dlp = resolve_yt_dlp(&app, &state.config)?;
+        let deno = resolve_deno_executable(&app);
+        crate::accounts::fetch_videos(
+            &state.db,
+            &state.accounts,
+            &state.processes,
+            &id,
+            offset.unwrap_or(0),
+            &yt_dlp,
+            deno.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Account videos request failed: {e}"))?
+}

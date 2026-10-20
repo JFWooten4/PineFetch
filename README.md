@@ -28,6 +28,7 @@ No account. No cloud. Your files stay on your machine.
 - Keep a local download history
 - Inspect stored metadata, transcripts and captions from History
 - Mine keywords locally across saved transcripts, OCR and captions ([details](docs/KEYWORDS.md))
+- Open accounts from History details to browse saved videos and public profile videos ([details](docs/ACCOUNTS.md))
 - Load public Social Insights on demand and keep snapshots in SQLite ([details](docs/SOCIAL_INSIGHTS.md))
 - Control PineFetch from the command line
 - Send links to PineFetch through its local Link Dump API

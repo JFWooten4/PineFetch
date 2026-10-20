@@ -17,6 +17,7 @@ pub(crate) struct AppState {
     pub(crate) processes: ProcessState,
     pub(crate) ocr: Arc<crate::ocr::OcrState>,
     pub(crate) ocr_preview: crate::ocr_preview::OcrPreviewState,
+    pub(crate) accounts: crate::accounts::AccountState,
     pub(crate) social_insights: crate::social_insights::SocialInsightsState,
     pub(crate) link_dump_server: Mutex<LinkDumpServerRuntime>,
 }
@@ -30,6 +31,7 @@ impl AppState {
             processes: ProcessState::default(),
             ocr: Arc::new(crate::ocr::OcrState::default()),
             ocr_preview: crate::ocr_preview::OcrPreviewState::default(),
+            accounts: crate::accounts::AccountState::default(),
             social_insights: crate::social_insights::SocialInsightsState::default(),
             link_dump_server: Mutex::new(LinkDumpServerRuntime::default()),
         }

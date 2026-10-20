@@ -30,7 +30,7 @@ const statuses = {
     extraction_error: 'The platform data could not be read. Try refreshing later.',
 };
 
-export const createHistorySocialInsightsView = ({ els, api, appendLog }) => {
+export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMetrics = false }) => {
     const pending = new Map();
     const state = { id: null, request: 0, content: undefined, reading: false, error: '' };
     const render = () => {
@@ -58,7 +58,19 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog }) => {
             : '';
         els.historySocialMetrics.replaceChildren();
         if (!content) return;
-        for (const [name, label] of Object.entries(labels)) {
+        const entries = Object.entries(labels).filter(
+            ([name]) =>
+                !profileMetrics ||
+                ['followers', 'following', 'posts', 'subscribers'].includes(name) ||
+                Number.isSafeInteger(content.data.metrics[name])
+        );
+        if (profileMetrics)
+            entries.sort(
+                ([left], [right]) =>
+                    Number(Number.isSafeInteger(content.data.metrics[right])) -
+                    Number(Number.isSafeInteger(content.data.metrics[left]))
+            );
+        for (const [name, label] of entries) {
             const card = document.createElement('div');
             card.className = 'oj-card pinefetch-social-metric';
             const heading = document.createElement('h3');
@@ -129,11 +141,17 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog }) => {
                 if (id === state.id && request === state.request) {
                     const message = /runtime|reinstall/i.test(String(error))
                         ? 'Social Insights tools are unavailable. Rebuild or reinstall PineFetch.'
-                        : /platform blocked/i.test(String(error))
-                          ? 'The platform blocked this request. Try again later.'
-                          : /requires sign-in/i.test(String(error))
-                            ? 'The platform requires sign-in to expose these metrics.'
-                            : 'Social Insights could not be loaded. Check your connection and try again.';
+                        : /verified account|account URL/i.test(String(error))
+                          ? 'The platform did not expose a verified account address for this video.'
+                          : /profile browsing is unavailable/i.test(String(error))
+                            ? 'Account insights are unavailable for this platform.'
+                            : /already loading/i.test(String(error))
+                              ? 'This account is already loading. Please wait and try again.'
+                              : /platform blocked/i.test(String(error))
+                                ? 'The platform blocked this request. Try again later.'
+                                : /requires sign-in/i.test(String(error))
+                                  ? 'The platform requires sign-in to expose these metrics.'
+                                  : 'Social Insights could not be loaded. Check your connection and try again.';
                     state.error = `${message}${state.content ? ' Previously saved data is still shown.' : ''}`;
                 }
             } finally {

@@ -87,3 +87,6 @@ retention, source changes, cascading deletion, schema-4 migration/backup/rollbac
 and Chromium/WebKit tab, keyboard, loading, navigation, offline snapshot and
 narrow-layout checks. Browser/native tests use isolated fixtures; no test writes
 the personal History database.
+
+Account profiles have their own [Account view and snapshots](ACCOUNTS.md),
+separate from each video’s Social Insights.

@@ -104,6 +104,7 @@ Shows the same totals as the right side of the app's History view:
 - **Downloaded videos:** the number of stored history entries.
 - **Total data:** the combined recorded file size.
 - **Total runtime:** the combined recorded media duration.
+- **Downloads by platform:** completed History entries per platform, for example `YouTube: 3` and `TikTok: 5`.
 
 Statistics cover the entire history, not just the latest 25 entries. Missing file-size or duration metadata does not contribute to the corresponding total.
 

@@ -94,7 +94,7 @@ fn validate(reply: &Reply) -> Result<(), String> {
     validate_data(&reply.fetchary_version, &reply.data)
 }
 
-fn validate_data(version: &str, payload: &Value) -> Result<(), String> {
+pub(crate) fn validate_data(version: &str, payload: &Value) -> Result<(), String> {
     let valid = || -> Option<()> {
         if version.is_empty() || version.len() > 64 {
             return None;
@@ -193,7 +193,25 @@ pub(crate) fn fetch(
         id: id.into(),
     };
     let url = source_url(db, id)?;
-    let parsed = url::Url::parse(&url).map_err(|_| "A public video URL is required.")?;
+    let (version, data) = fetch_url(processes, &url, tools)?;
+    save(
+        db,
+        SocialInsightsSnapshot {
+            history_entry_id: id.into(),
+            source_url: url,
+            fetched_at: crate::files::current_timestamp_millis(),
+            fetchary_version: version,
+            data,
+        },
+    )
+}
+
+pub(crate) fn fetch_url(
+    processes: &ProcessState,
+    url: &str,
+    tools: &SocialInsightsTools,
+) -> Result<(String, Value), String> {
+    let parsed = url::Url::parse(url).map_err(|_| "A public video URL is required.")?;
     if !matches!(parsed.scheme(), "http" | "https")
         || !parsed.username().is_empty()
         || parsed.password().is_some()
@@ -203,7 +221,7 @@ pub(crate) fn fetch(
     let mut command = Command::new(&tools.node);
     command
         .arg(&tools.script)
-        .arg(&url)
+        .arg(url)
         .env_remove("NODE_OPTIONS")
         .env_remove("NODE_PATH");
     let output = process::run_command_output(
@@ -236,16 +254,7 @@ pub(crate) fn fetch(
         }
         _ => {}
     }
-    save(
-        db,
-        SocialInsightsSnapshot {
-            history_entry_id: id.into(),
-            source_url: url,
-            fetched_at: crate::files::current_timestamp_millis(),
-            fetchary_version: reply.fetchary_version,
-            data: reply.data,
-        },
-    )
+    Ok((reply.fetchary_version, reply.data))
 }
 
 #[cfg(test)]
@@ -363,7 +372,7 @@ mod tests {
         let root = TempRoot::new("social-migration");
         let path = root.path("history.sqlite");
         let conn = database::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE history_social_insights; PRAGMA user_version=4; INSERT INTO history_entries(id,url,title,created_at) VALUES ('video','https://example.com/video','Original title',123);").unwrap();
+        conn.execute_batch("DROP TABLE history_account_insights; DROP INDEX idx_history_account_lookup; DROP TABLE history_social_insights; PRAGMA user_version=4; INSERT INTO history_entries(id,url,title,created_at) VALUES ('video','https://example.com/video','Original title',123);").unwrap();
         drop(conn);
         let before = fs::read(&path).unwrap();
         assert!(database::open_with_hook(&path, |point| {
@@ -379,7 +388,7 @@ mod tests {
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            5
+            database::SCHEMA_VERSION
         );
         assert_eq!(
             conn.query_row("SELECT title FROM history_entries", [], |r| r

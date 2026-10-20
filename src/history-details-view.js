@@ -12,6 +12,7 @@ export const createHistoryDetailsView = ({
     formatDuration,
     detectPlatform,
     showSavedVideosByCreator,
+    openAccount,
     jobs,
     navigateToDetails,
     navigateToHistory,
@@ -120,7 +121,19 @@ export const createHistoryDetailsView = ({
             addOverviewRow('Platform', platform);
         addOverviewRow('Original URL', entry.url, entry.url);
         addOverviewRow('Title', entry.title);
-        addOverviewRow('Creator', entry.uploader);
+        if (entry.uploader) {
+            const term = document.createElement('dt');
+            term.textContent = 'Creator';
+            const description = document.createElement('dd');
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'oj-button oj-button-ghost pinefetch-account-link';
+            button.textContent = entry.uploader;
+            button.disabled = !source;
+            button.addEventListener('click', () => openAccount(entry.id, button));
+            description.append(button);
+            els.historyOverviewList.append(term, description);
+        }
         addOverviewRow('Downloaded', downloaded);
         addOverviewRow('Uploaded', uploaded);
         addOverviewRow(
@@ -309,6 +322,7 @@ export const createHistoryDetailsView = ({
         navigateToDetails(entryId);
         els.historyDetailsTitle.textContent = 'Video Details';
         els.historyDetailsSubtitle.textContent = '';
+        els.historyDetailsAccountBtn.hidden = true;
         els.historyDetailsThumbnail.hidden = true;
         els.historyDetailsThumbnail.removeAttribute('src');
         els.historyDetailsHeader.classList.add('pinefetch-no-media');
@@ -328,10 +342,12 @@ export const createHistoryDetailsView = ({
             els.historyDetailsTitle.textContent = title;
             els.historyDetailsSubtitle.textContent = [
                 formatHistorySource(details.entry?.source || detectPlatform(details.entry?.url)),
-                details.entry?.uploader,
             ]
                 .filter(Boolean)
                 .join(' · ');
+            const account = details.entry?.uploader;
+            els.historyDetailsAccountBtn.textContent = account ? `View account: ${account}` : '';
+            els.historyDetailsAccountBtn.hidden = !account || !details.entry?.source;
             if (details.entry?.thumbnail) {
                 els.historyDetailsThumbnail.src = details.entry.thumbnail;
                 els.historyDetailsThumbnail.hidden = false;
@@ -467,6 +483,9 @@ export const createHistoryDetailsView = ({
         window.addEventListener('blur', () => hideContextMenu());
         els.historyList.addEventListener('scroll', () => hideContextMenu(), { passive: true });
 
+        els.historyDetailsAccountBtn.addEventListener('click', () => {
+            if (state.details?.entry?.id) openAccount(state.details.entry.id, els.historyDetailsAccountBtn);
+        });
         els.historyDetailsBackBtn.addEventListener('click', () => navigateToHistory(state.returnFocus));
         els.historyDetailsThumbnail.addEventListener('error', () => {
             els.historyDetailsThumbnail.hidden = true;

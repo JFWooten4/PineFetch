@@ -1,6 +1,7 @@
 import { confirmDialog } from './vendor/oj/index.js';
 import { createDropdownChoice } from './dropdown-choice.js';
 import { formatHistorySource, formatLocalDateTime, formatUploadDate } from './formatters.js';
+import { createHistoryAccountView } from './history-account-view.js';
 import { createHistoryDetailsView } from './history-details-view.js';
 import { createHistoryOcrJobs, ocrActive } from './history-ocr-jobs.js';
 
@@ -13,6 +14,7 @@ export const createHistoryView = ({
     detectPlatform,
     appendTextSpans,
     isActive,
+    prepareDownload,
 }) => {
     const state = Object.seal({
         historyOffset: 0,
@@ -29,6 +31,8 @@ export const createHistoryView = ({
         historyClearing: false,
         page: 'list',
         selectedId: null,
+        accountEntryId: null,
+        detailsReturnPage: 'list',
         scrollTop: 0,
     });
     const historyPageSize = 20;
@@ -57,14 +61,32 @@ export const createHistoryView = ({
         detectPlatform,
         showSavedVideosByCreator: creator => showSavedVideosByCreator(creator),
         jobs,
+        openAccount: id => {
+            state.accountEntryId = id;
+            state.detailsReturnPage = 'list';
+            historyDetailsView.leave();
+            state.page = 'account';
+            activate();
+            accountView.open(id);
+        },
         navigateToDetails: id => {
             if (state.page === 'list') state.scrollTop = els.historyList.scrollTop;
+            state.detailsReturnPage = state.page === 'account' ? 'account' : 'list';
+            els.historyDetailsBackBtn.querySelector('[data-history-back-label]').textContent =
+                state.detailsReturnPage === 'account' ? 'Back to account' : 'Back to History';
             state.page = 'detail';
             state.selectedId = id;
             activate();
         },
         navigateToHistory: returnFocus => {
             historyDetailsView.leave();
+            if (state.detailsReturnPage === 'account') {
+                state.page = 'account';
+                activate();
+                accountView.open(state.accountEntryId);
+                return;
+            }
+            accountView.leave();
             state.page = 'list';
             state.selectedId = null;
             activate();
@@ -76,13 +98,32 @@ export const createHistoryView = ({
         },
     });
 
+    const accountView = createHistoryAccountView({
+        els,
+        api,
+        appendLog,
+        prepareDownload,
+        openVideo: (id, button) => void historyDetailsView.open(id, button),
+        back: () => {
+            const id = state.accountEntryId;
+            accountView.leave();
+            state.page = 'detail';
+            state.detailsReturnPage = 'list';
+            void historyDetailsView.open(id, els.historySearchInput);
+        },
+    });
+
     const activate = () => {
         const detail = isActive() && state.page === 'detail';
-        const list = isActive() && !detail;
+        const account = isActive() && state.page === 'account';
+        const list = isActive() && state.page === 'list';
+        els.historyAccountView.hidden = !account;
         els.historyDetailsView.hidden = !detail;
         els.historyView.hidden = !list;
         els.historySummaryView.hidden = !list;
-        els.historyView.closest('.pinefetch-split').classList.toggle('pinefetch-history-details-active', detail);
+        els.historyView
+            .closest('.pinefetch-split')
+            .classList.toggle('pinefetch-history-details-active', detail || account);
         updateHistoryResultCount();
         historyDetailsView.hideContextMenu();
         historyDetailsView.activate();
@@ -126,7 +167,7 @@ export const createHistoryView = ({
     const updateHistoryResultCount = () => {
         const hasCount = Boolean(state.historyQuery) && state.historyTotalCount !== null;
         els.historyResultCount.textContent = hasCount ? `${state.historyTotalCount.toLocaleString()} found` : '';
-        els.historyResultCount.hidden = !isActive() || state.page === 'detail' || !hasCount;
+        els.historyResultCount.hidden = !isActive() || state.page !== 'list' || !hasCount;
     };
 
     const updateHistoryActions = () => {
@@ -409,6 +450,7 @@ export const createHistoryView = ({
             { once: true }
         );
         historyDetailsView.bindEvents();
+        accountView.bindEvents();
         const searchPlaceholders = {
             title: 'Search titles',
             description: 'Search descriptions',

@@ -198,7 +198,9 @@ try {
     await capture('ocr.webp');
 
     await page.locator('#historySocialTab').click();
-    await page.waitForFunction(() => globalThis.document.querySelectorAll('.pinefetch-social-metric').length === 9);
+    await page.waitForFunction(
+        () => globalThis.document.querySelectorAll('#historySocialMetrics .pinefetch-social-metric').length === 9
+    );
     assert.equal(await page.locator('#historySocialLoadBtn').textContent(), 'Refresh Social Insights');
     await capture('social_insights.webp');
 
@@ -212,6 +214,13 @@ try {
         keywords.result.terms.map(term => term.term)
     );
     await capture('keywords.webp');
+    await page.locator('#historyDetailsAccountBtn').click();
+    await page.waitForFunction(
+        () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 4
+    );
+    await capture('account.webp');
+    await page.locator('#historyAccountBackBtn').click();
+    await page.locator('#historyDetailsContent').waitFor();
     await page.locator('#historyDetailsBackBtn').click();
 
     await page.locator('#viewLinkDumpBtn').click();

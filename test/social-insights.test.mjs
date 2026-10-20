@@ -50,3 +50,20 @@ test('adapter rejects nonpublic URL forms before invoking Fetchary and propagate
         /offline/
     );
 });
+
+test('the same Fetchary adapter extracts account metrics with channel identity, zero and missing counts', async () => {
+    const target = 'https://www.youtube.com/@creator';
+    const html =
+        '<html><head><link rel="canonical" href="https://www.youtube.com/@creator"></head><body><script>var ytInitialData = {"header":{"c4TabbedHeaderRenderer":{"channelId":"UCfixture","subscriberCountText":{"simpleText":"0 subscribers"}}}};</script></body></html>';
+    const result = await loadSocialInsights(target, (url, options) =>
+        extractSocialInsights(url, {
+            ...options,
+            lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+            fetch: async () => new Response(html, { headers: { 'content-type': 'text/html' } }),
+        })
+    );
+    assert.equal(result.data.kind, 'channel');
+    assert.equal(result.data.metrics.subscribers, 0);
+    assert.equal(result.data.metrics.views, null);
+    assert.equal(result.data.url, target);
+});

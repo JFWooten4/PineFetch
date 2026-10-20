@@ -586,6 +586,7 @@ pub(super) fn delete_history_entry_from_db(
     let tx = database::write_transaction(&conn)?;
     tx.execute("DELETE FROM history_entries WHERE id = ?1", params![id])
         .map_err(|e| format!("History delete failed: {e}"))?;
+    tx.execute("DELETE FROM history_account_insights WHERE NOT EXISTS (SELECT 1 FROM history_entries h WHERE lower(h.source)=history_account_insights.source AND h.uploader=history_account_insights.uploader)", []).map_err(|e| format!("Account cleanup failed: {e}"))?;
     tx.commit()
         .map_err(|e| format!("History deletion commit failed: {e}"))
 }
@@ -595,6 +596,7 @@ pub(super) fn clear_history_entries_in_db(state: &crate::database::Database) -> 
     let tx = database::write_transaction(&conn)?;
     tx.execute("DELETE FROM history_entries", [])
         .map_err(|e| format!("History clear failed: {e}"))?;
+    tx.execute("DELETE FROM history_account_insights WHERE NOT EXISTS (SELECT 1 FROM history_entries h WHERE lower(h.source)=history_account_insights.source AND h.uploader=history_account_insights.uploader)", []).map_err(|e| format!("Account cleanup failed: {e}"))?;
     tx.commit()
         .map_err(|e| format!("History deletion commit failed: {e}"))
 }

@@ -4,6 +4,7 @@ use crate::state::AppState;
 use crate::worker::stop_active_download_on_exit;
 use tauri::Manager;
 
+mod accounts;
 #[cfg(test)]
 mod application_failure_tests;
 #[cfg(test)]
@@ -152,6 +153,9 @@ fn main() {
             commands::cancel_download,
             commands::get_history,
             commands::get_history_stats,
+            commands::get_history_account,
+            commands::load_history_account_insights,
+            commands::load_history_account_videos,
             commands::get_history_details,
             commands::get_history_keywords,
             commands::get_history_social_insights,

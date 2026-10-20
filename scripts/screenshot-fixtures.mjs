@@ -138,6 +138,59 @@ export const installScreenshotBridge = ({ videos, version, ocr = null, social = 
                             has_more: offset + limit < frames.length,
                         });
                     }
+                    case 'get_history_account': {
+                        const entry = history.find(entry => entry.id === args.id);
+                        if (!entry) throw new Error('Unknown account fixture');
+                        const matching = history.filter(
+                            row => row.source === entry.source && row.uploader === entry.uploader
+                        );
+                        const offset = args.offset || 0;
+                        return {
+                            source: entry.source,
+                            uploader: entry.uploader,
+                            saved: {
+                                entries: structuredClone(matching.slice(offset, offset + 20)),
+                                total_count: matching.length,
+                                has_more: offset + 20 < matching.length,
+                            },
+                            insights: social
+                                ? {
+                                      source: entry.source,
+                                      uploader: entry.uploader,
+                                      profile_url: 'https://www.youtube.com/@demo',
+                                      fetched_at: social.snapshot.fetched_at,
+                                      fetchary_version: social.snapshot.fetchary_version,
+                                      data: {
+                                          ...structuredClone(social.snapshot.data),
+                                          kind: 'channel',
+                                          url: 'https://www.youtube.com/@demo',
+                                          metrics: {
+                                              views: null,
+                                              likes: null,
+                                              comments: null,
+                                              shares: null,
+                                              saves: null,
+                                              followers: null,
+                                              following: null,
+                                              posts: null,
+                                              subscribers: 12500,
+                                          },
+                                          sources: { subscribers: { approximate: true } },
+                                          unavailable: {
+                                              views: 'unsupported',
+                                              likes: 'unsupported',
+                                              comments: 'unsupported',
+                                              shares: 'unsupported',
+                                              saves: 'unsupported',
+                                              followers: 'unsupported',
+                                              following: 'unsupported',
+                                              posts: 'not_exposed',
+                                          },
+                                      },
+                                  }
+                                : null,
+                        };
+                    }
                     case 'get_history_social_insights':
                         return history.find(entry => entry.id === args.id)?.url === social?.url
                             ? structuredClone({ ...social.snapshot, history_entry_id: args.id })

@@ -40,6 +40,12 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
         copied: '',
         ocrRecords: {},
         socialRecords: {},
+        accountRecords: {},
+        accountFetches: 0,
+        holdAccount: false,
+        releaseAccount: null,
+        failAccount: false,
+        profileFetches: 0,
         keywordRecords: { 'history-1': keywordFixture },
         holdKeywords: false,
         releaseKeywords: null,
@@ -214,6 +220,80 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
                 });
             }
             return result;
+        }
+        if (command === 'get_history_account') {
+            const entries = historyEntries || (await invoke('get_history', { offset: 0, limit: 100 })).entries;
+            const entry = entries.find(entry => entry.id === args.id);
+            if (!entry) throw new Error('Missing fixture account');
+            const matching = entries.filter(row => row.uploader === entry.uploader && row.source === entry.source);
+            const offset = args.offset || 0;
+            return {
+                source: entry.source,
+                uploader: entry.uploader,
+                saved: {
+                    entries: matching.slice(offset, offset + 20),
+                    total_count: matching.length,
+                    has_more: matching.length > offset + 20,
+                },
+                insights: structuredClone(ui.accountRecords[entry.uploader] || null),
+            };
+        }
+        if (command === 'load_history_account_insights') {
+            ui.accountFetches++;
+            const account = await globalThis.__TAURI__.core.invoke('get_history_account', { id: args.id });
+            const complete = () => {
+                if (ui.failAccount) throw new Error('Fixture account network failure');
+                const snapshot = {
+                    source: account.source,
+                    uploader: account.uploader,
+                    profile_url: 'https://www.youtube.com/@fixture',
+                    fetched_at: 1700000000000,
+                    fetchary_version: '2.0.4',
+                    data: {
+                        platform: account.source,
+                        kind: 'channel',
+                        url: 'https://www.youtube.com/@fixture',
+                        status: 'partial',
+                        metrics: {
+                            views: null,
+                            likes: null,
+                            comments: null,
+                            shares: null,
+                            saves: null,
+                            followers: null,
+                            following: null,
+                            posts: 0,
+                            subscribers: 12345,
+                        },
+                        sources: {},
+                        unavailable: { likes: 'unsupported' },
+                    },
+                };
+                ui.accountRecords[account.uploader] = snapshot;
+                return structuredClone(snapshot);
+            };
+            if (ui.holdAccount) {
+                ui.holdAccount = false;
+                return new Promise((resolve, reject) => {
+                    ui.releaseAccount = () => {
+                        try {
+                            resolve(complete());
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                });
+            }
+            return complete();
+        }
+        if (command === 'load_history_account_videos') {
+            ui.profileFetches++;
+            return {
+                profile_url: 'https://www.youtube.com/@fixture',
+                entries: [{ url: ui.playlistVideos[0].url, title: '<img src=x> Profile video' }],
+                next_offset: 50,
+                has_more: !args.offset,
+            };
         }
         if (command === 'get_history_social_insights') return structuredClone(ui.socialRecords[args.id] || null);
         if (command === 'load_history_social_insights') {
@@ -2140,6 +2220,100 @@ try {
             });
             await closeDetails();
 
+            // Account navigation is local; profile metrics and video discovery require explicit clicks.
+            await openOcr('history-1');
+            await page.locator('#historyOverviewTab').click();
+            await page.locator('#historyDetailsAccountBtn').click();
+            await page.locator('#historyAccountView').waitFor();
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#historyAccountSavedList').childElementCount > 0
+            );
+            assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.accountFetches), 0);
+            assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.profileFetches), 0);
+            await page.waitForFunction(
+                () => !globalThis.document.querySelector('#historyAccountSocialLoadBtn').disabled
+            );
+            await page.evaluate(async () => {
+                const page = await globalThis.__TAURI__.core.invoke('get_history', { offset: 0, limit: 100 });
+                const first = page.entries.find(entry => entry.id === 'history-1');
+                globalThis.__pinefetchUi.setHistoryEntries([
+                    ...page.entries,
+                    ...Array.from({ length: 25 }, (_, index) => ({
+                        ...first,
+                        id: `account-extra-${index}`,
+                        title: `Saved account video ${index}`,
+                    })),
+                    { ...first, id: 'account-different-platform', source: 'tiktok' },
+                    { ...first, id: 'account-similar-name', uploader: `${first.uploader} Extra` },
+                ]);
+                globalThis.__pinefetchUi.holdAccount = true;
+            });
+            await page.locator('#historyAccountSocialLoadBtn').click();
+            assert(await page.locator('#historyAccountSocialLoadBtn').isDisabled());
+            await page.locator('#historyAccountBackBtn').click();
+            await page.locator('#historyDetailsContent').waitFor();
+            await page.evaluate(() => globalThis.__pinefetchUi.releaseAccount());
+            assert(await page.locator('#historyAccountView').isHidden());
+            await page.locator('#historyDetailsAccountBtn').click();
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 4
+            );
+            assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.accountFetches), 1);
+            assert.equal(await page.locator('#historyAccountSavedList button').count(), 20);
+            await page.locator('#historyAccountMoreSavedBtn').click();
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#historyAccountSavedList').childElementCount === 27
+            );
+            assert(await page.locator('#historyAccountMoreSavedBtn').isHidden());
+            assert.match(await page.locator('#historyAccountSavedCount').textContent(), /^27 completed downloads/);
+            const accountMetrics = page.locator('#historyAccountSocialMetrics');
+            assert.match(await accountMetrics.innerText(), /Subscribers[\s\S]*12[,.]345/);
+            assert.match(await accountMetrics.innerText(), /Posts[\s\S]*0/);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failAccount = true;
+            });
+            await page.locator('#historyAccountSocialLoadBtn').click();
+            await page.waitForFunction(() =>
+                globalThis.document
+                    .querySelector('#historyAccountSocialStatus')
+                    .textContent.includes('Previously saved data')
+            );
+            assert.match(await accountMetrics.innerText(), /12[,.]345/);
+            await page.evaluate(() => {
+                globalThis.__pinefetchUi.failAccount = false;
+            });
+            await page.locator('#historyAccountVideosBtn').click();
+            await page.locator('#historyAccountRemoteList button').waitFor();
+            assert.equal(await page.locator('#historyAccountRemoteList img').count(), 0);
+            await page.locator('#historyAccountMoreVideosBtn').click();
+            assert.equal(await page.locator('#historyAccountRemoteList button').count(), 1);
+            assert(await page.locator('#historyAccountMoreVideosBtn').isHidden());
+            await page.locator('#historyAccountSavedList button').first().click();
+            await page.locator('#historyDetailsContent').waitFor();
+            assert.match(await page.locator('#historyDetailsBackBtn').textContent(), /Back to account/);
+            await page.locator('#historyDetailsBackBtn').click();
+            await page.locator('#historyAccountView').waitFor();
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 4
+            );
+            const accountViewport = page.viewportSize();
+            await page.setViewportSize({ width: 390, height: 844 });
+            assert(await page.evaluate(() => globalThis.document.documentElement.scrollWidth <= globalThis.innerWidth));
+            await page.screenshot({ path: `/tmp/pinefetch-account-${engine.name()}.png` });
+            await page.setViewportSize(accountViewport);
+            await page.locator('#historyAccountVideosBtn').click();
+            await page.locator('#historyAccountRemoteList button').click();
+            await page.evaluate(() => globalThis.__pinefetchUi.setHistoryEntries(null));
+            await page.locator('#downloadView').waitFor();
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#infoTitle').textContent !== 'No video loaded'
+            );
+            assert.equal(await page.locator('#urlInput').inputValue(), videos[0].url);
+            await page.locator('#viewHistoryBtn').click();
+            await page.locator('#historyAccountBackBtn').click();
+            await page.locator('#historyDetailsContent').waitFor();
+            await closeDetails();
+
             // Social Insights load from SQLite on tab open; only a click starts a fetch.
             await openOcr('history-1');
             await page.locator('#historyOcrTab').focus();
@@ -2173,10 +2347,11 @@ try {
             await openOcr('history-1');
             await page.locator('#historySocialTab').click();
             await page.waitForFunction(
-                () => globalThis.document.querySelectorAll('.pinefetch-social-metric').length === 9
+                () =>
+                    globalThis.document.querySelectorAll('#historySocialMetrics .pinefetch-social-metric').length === 9
             );
             assert.equal(await page.evaluate(() => globalThis.__pinefetchUi.socialFetches), 1);
-            const insightCards = page.locator('.pinefetch-social-metric');
+            const insightCards = page.locator('#historySocialMetrics .pinefetch-social-metric');
             assert.match(await insightCards.nth(0).textContent(), /12[,.]345.*Approximate/s);
             assert.match(await insightCards.nth(1).textContent(), /Likes0Public count/);
             assert.match(await insightCards.nth(3).textContent(), /Shares—Not supported/);
@@ -2712,7 +2887,7 @@ try {
             assert(loadedFonts.some(url => url.includes('fa-solid')));
             assert.deepEqual(errors, []);
             console.log(
-                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, playlist auto-import/retry/deduplication/clipboard, history filters/creator/reset, transcription model/save rollback, menus, tabs, full-container details, local keyword counts/filtering/pagination/late replies, OCR frame grouping/native pagination/search/full export/confirmed deletion/late replies, background navigation, preserved History state, confirmations and switches passed.`
+                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, playlist auto-import/retry/deduplication/clipboard, history filters/creator/reset, account navigation/pagination/insights/profile video selection, transcription model/save rollback, menus, tabs, full-container details, local keyword counts/filtering/pagination/late replies, OCR frame grouping/native pagination/search/full export/confirmed deletion/late replies, background navigation, preserved History state, confirmations and switches passed.`
             );
         } finally {
             await browser.close();

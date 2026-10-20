@@ -175,6 +175,26 @@ const els = Object.seal({
     historyOcrResultCount: document.getElementById('historyOcrResultCount'),
     historyOcrEmpty: document.getElementById('historyOcrEmpty'),
     historyOcrLoadMoreBtn: document.getElementById('historyOcrLoadMoreBtn'),
+    historyAccountView: document.getElementById('historyAccountView'),
+    historyAccountBackBtn: document.getElementById('historyAccountBackBtn'),
+    historyAccountTitle: document.getElementById('historyAccountTitle'),
+    historyAccountMeta: document.getElementById('historyAccountMeta'),
+    historyAccountOpenBtn: document.getElementById('historyAccountOpenBtn'),
+    historyAccountStatus: document.getElementById('historyAccountStatus'),
+    historyAccountSavedTitle: document.getElementById('historyAccountSavedTitle'),
+    historyAccountSavedCount: document.getElementById('historyAccountSavedCount'),
+    historyAccountSavedList: document.getElementById('historyAccountSavedList'),
+    historyAccountMoreSavedBtn: document.getElementById('historyAccountMoreSavedBtn'),
+    historyAccountSocialLoadBtn: document.getElementById('historyAccountSocialLoadBtn'),
+    historyAccountSocialResults: document.getElementById('historyAccountSocialResults'),
+    historyAccountSocialStatus: document.getElementById('historyAccountSocialStatus'),
+    historyAccountSocialMeta: document.getElementById('historyAccountSocialMeta'),
+    historyAccountSocialMetrics: document.getElementById('historyAccountSocialMetrics'),
+    historyAccountVideosBtn: document.getElementById('historyAccountVideosBtn'),
+    historyAccountVideosStatus: document.getElementById('historyAccountVideosStatus'),
+    historyAccountRemoteList: document.getElementById('historyAccountRemoteList'),
+    historyAccountMoreVideosBtn: document.getElementById('historyAccountMoreVideosBtn'),
+    historyDetailsAccountBtn: document.getElementById('historyDetailsAccountBtn'),
     historyDetailsView: document.getElementById('historyDetailsView'),
     historyDetailsHeader: document.getElementById('historyDetailsHeader'),
     historyDetailsThumbnail: document.getElementById('historyDetailsThumbnail'),
@@ -1546,6 +1566,11 @@ const historyView = createHistoryView({
     detectPlatform,
     appendTextSpans,
     isActive: () => state.activeView === 'history',
+    prepareDownload: url => {
+        setActiveView('download');
+        els.urlInput.value = url;
+        void loadInfo();
+    },
 });
 
 const bindEvents = () => {
