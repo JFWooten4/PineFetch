@@ -275,6 +275,10 @@ body {
     align-items: baseline;
 }
 
+.pinefetch-history-source-name {
+    gap: var(--oj-space-2);
+}
+
 .pinefetch-history-sources-list strong {
     color: var(--oj-accent-text);
 }
