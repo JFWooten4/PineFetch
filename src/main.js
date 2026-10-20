@@ -1,6 +1,7 @@
 import { initOJ, toast } from './vendor/oj/index.js';
 import { createDropdownChoice } from './dropdown-choice.js';
 import { formatDuration, formatFileSize } from './formatters.js';
+import { createPlatformIcon } from './platform-icons.js';
 import {
     createAppState,
     updateJobState,
@@ -348,19 +349,6 @@ const createIcon = (name, family = 'fa-solid') => {
     icon.className = `${family} fa-${name}`;
     icon.setAttribute('aria-hidden', 'true');
     return icon;
-};
-
-const getPlatformIconElement = platform => {
-    const icons = {
-        youtube: 'youtube',
-        facebook: 'facebook',
-        twitch: 'twitch',
-        x: 'x-twitter',
-        tiktok: 'tiktok',
-        instagram: 'instagram',
-        reddit: 'reddit-alien',
-    };
-    return icons[platform] ? createIcon(icons[platform], 'fa-brands') : null;
 };
 
 const appendTextSpans = (parent, values) => {
@@ -767,7 +755,7 @@ const renderQueue = () => {
         if (platform) {
             const platformIcon = document.createElement('span');
             platformIcon.className = `pinefetch-queue-platform-icon pinefetch-platform-${platform}`;
-            const icon = getPlatformIconElement(platform);
+            const icon = createPlatformIcon(platform);
             if (icon) {
                 platformIcon.appendChild(icon);
                 title.appendChild(platformIcon);

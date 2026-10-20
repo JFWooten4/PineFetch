@@ -1,5 +1,6 @@
 import { formatHistorySource } from './formatters.js';
 import { createHistorySocialInsightsView } from './history-social-insights-view.js';
+import { createPlatformIcon } from './platform-icons.js';
 
 export const createHistoryAccountView = ({ els, api, appendLog, openVideo, back, prepareDownload }) => {
     const state = {
@@ -117,6 +118,8 @@ export const createHistoryAccountView = ({ els, api, appendLog, openVideo, back,
             const total = page.saved.total_count.toLocaleString();
             els.historyAccountTitle.textContent = page.uploader;
             els.historyAccountMeta.textContent = formatHistorySource(page.source);
+            const platformIcon = createPlatformIcon(page.source);
+            if (platformIcon) els.historyAccountMeta.prepend(platformIcon);
             els.historyAccountSummary.textContent = `${total} saved ${page.saved.total_count === 1 ? 'download' : 'downloads'}`;
             els.historyAccountSavedCount.textContent = total;
             els.historyAccountSavedCount.setAttribute('aria-label', `${total} saved downloads`);
