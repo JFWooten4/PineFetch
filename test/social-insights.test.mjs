@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { test } from 'node:test';
 const require = createRequire(import.meta.url);
 const { loadSocialInsights } = require('../native/social-insights.cjs');
-const { extractSocialInsights } = require('fetchary');
+const { extractSocialInsights, FetcharyBrowserError } = require('fetchary');
 const { dependencies } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const url = 'https://www.youtube.com/watch?v=AbC123';
 
@@ -94,4 +94,81 @@ test('TikTok public handles return profile counts and exclude other accounts in 
     assert.equal(result.data.metrics.posts, 858);
     assert.equal(result.data.metrics.subscribers, null);
     assert.equal(result.data.unavailable.subscribers, 'unsupported');
+});
+
+test('Instagram browser resource failures retry public HTTP metadata through the real Fetchary library', async () => {
+    const target = 'https://www.instagram.com/reel/DeCHfZaMmPc/';
+    const html = await readFile(new URL('./fixtures/social-insights/instagram-reel.html', import.meta.url), 'utf8');
+    const modes = [];
+    const result = await loadSocialInsights(target, (url, options) => {
+        assert.equal(url, target);
+        assert.equal(options.timeout, 20000);
+        assert.equal(options.maxResponseBytes, 64 * 1024 * 1024);
+        assert.equal(options.cacheTtlMs, 0);
+        assert.equal(options.cookieFile, undefined);
+        assert.equal(options.cookiesFromBrowser, undefined);
+        assert.equal(options.session, undefined);
+        modes.push(options.mode);
+        if (options.mode === 'browser')
+            throw new FetcharyBrowserError('could not read complete browser request body', { phase: 'resource' });
+        return extractSocialInsights(url, {
+            ...options,
+            lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+            fetch: async () => new Response(html, { headers: { 'content-type': 'text/html' } }),
+        });
+    });
+    assert.deepEqual(modes, ['browser', 'http']);
+    assert.equal(result.fetchary_version, dependencies.fetchary);
+    assert.equal(result.data.status, 'partial');
+    assert.equal(result.data.url, target);
+    assert.equal(result.data.metrics.likes, 9);
+    assert.equal(result.data.metrics.comments, 2);
+    assert.equal(result.data.metrics.views, null);
+    assert.equal(result.data.metrics.score, null);
+});
+
+test('fallback preserves failure semantics for runtime, network, empty and blocked results', async () => {
+    for (const failure of [
+        new Error('offline'),
+        new FetcharyBrowserError('missing runtime', {
+            phase: 'launch',
+            cause: Object.assign(new Error('missing browser'), { code: 'PINEFETCH_SOCIAL_BROWSER_UNAVAILABLE' }),
+        }),
+        new FetcharyBrowserError('navigation failure', { phase: 'navigation' }),
+    ]) {
+        const modes = [];
+        await assert.rejects(
+            loadSocialInsights(url, (_target, options) => {
+                modes.push(options.mode);
+                throw failure;
+            }),
+            error => error === failure
+        );
+        assert.deepEqual(modes, ['browser']);
+    }
+    for (const data of [
+        { status: 'unavailable', metrics: { likes: null } },
+        { status: 'partial', metrics: { likes: null } },
+        { status: 'blocked', metrics: { likes: null } },
+        { status: 'login_required', metrics: { likes: null } },
+    ]) {
+        const failure = new FetcharyBrowserError('resource failure', { phase: 'resource' });
+        const modes = [];
+        await assert.rejects(
+            loadSocialInsights(url, (_target, options) => {
+                modes.push(options.mode);
+                if (options.mode === 'browser') throw failure;
+                return { data };
+            }),
+            error => error === failure
+        );
+        assert.deepEqual(modes, ['browser', 'http']);
+    }
+    await assert.rejects(
+        loadSocialInsights(url, (_target, options) => {
+            if (options.mode === 'browser') throw new FetcharyBrowserError('resource failure', { phase: 'resource' });
+            throw new Error('HTTP failed too');
+        }),
+        /HTTP failed too/
+    );
 });

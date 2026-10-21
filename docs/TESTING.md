@@ -285,7 +285,8 @@ missing-creator fallback, preserved History filters/scroll/focus, failed refresh
 and verifies a JavaScript-rendered page before and after relocating the staged
 runtime. `npm run test:social-browser` uses that bundled browser and Fetchary in
 browser mode against injected public-page fixtures, without a live social request.
-The suite checks rendered account/video metrics, browser cleanup and native
+The suite checks rendered account/video metrics, Instagram HTTP fallback after
+a browser resource failure, browser cleanup and native
 process-group cancellation. It runs separately from the fast JS gate because
 it requires the prepared runtime. No installed browser or personal browser cache
 is used.

@@ -117,7 +117,8 @@ pub(crate) fn validate_data(version: &str, payload: &Value) -> Result<(), String
         data.get("url")?.as_str()?;
         data.get("kind")?.as_str()?;
         let metrics = data.get("metrics")?.as_object()?;
-        if metrics.len() != METRICS.len() {
+        let score = metrics.get("score");
+        if metrics.len() != METRICS.len() + usize::from(score.is_some()) {
             return None;
         }
         for name in METRICS {
@@ -129,6 +130,16 @@ pub(crate) fn validate_data(version: &str, payload: &Value) -> Result<(), String
             {
                 return None;
             }
+        }
+        // Fetchary 2.0.7 adds Reddit's signed score. Older snapshots do not
+        // contain this field; ordinary metric counts remain nonnegative.
+        if score.is_some_and(|value| {
+            !value.is_null()
+                && value
+                    .as_i64()
+                    .is_none_or(|score| score.unsigned_abs() > 9_007_199_254_740_991)
+        }) {
+            return None;
         }
         data.get("sources")?.as_object()?;
         data.get("unavailable")?.as_object()?;
@@ -373,6 +384,52 @@ mod tests {
         assert!(validate(&reply).is_err());
     }
     #[test]
+    fn optional_fetchary_score_round_trips_while_legacy_and_count_rules_remain_valid() {
+        let db = db();
+        validate_data("2.0.4", &snapshot(1).data).unwrap();
+        for score in [
+            Value::Null,
+            0.into(),
+            (-3).into(),
+            9_007_199_254_740_991_i64.into(),
+            (-9_007_199_254_740_991_i64).into(),
+        ] {
+            let mut value = snapshot(123);
+            value.fetchary_version = "2.0.7".into();
+            value.data["metrics"]["score"] = score.clone();
+            save(&db, value).unwrap();
+            assert_eq!(
+                get(&db, "video").unwrap().unwrap().data["metrics"]["score"],
+                score
+            );
+        }
+        for score in [
+            serde_json::json!(1.25),
+            serde_json::json!("3"),
+            serde_json::json!(9_007_199_254_740_992_i64),
+            serde_json::json!(-9_007_199_254_740_992_i64),
+        ] {
+            let mut value = snapshot(456);
+            value.data["metrics"]["score"] = score;
+            assert!(save(&db, value).is_err());
+            assert_eq!(get(&db, "video").unwrap().unwrap().fetched_at, 123);
+        }
+        let mut invalid = snapshot(456);
+        invalid.data["metrics"]["unknown"] = Value::Null;
+        assert!(save(&db, invalid).is_err());
+        let mut invalid = snapshot(456);
+        invalid.data["metrics"]["score"] = 0.into();
+        invalid.data["metrics"]["likes"] = (-1).into();
+        assert!(save(&db, invalid).is_err());
+        let mut invalid = snapshot(456);
+        invalid.data["metrics"]
+            .as_object_mut()
+            .unwrap()
+            .remove("views");
+        invalid.data["metrics"]["score"] = 0.into();
+        assert!(save(&db, invalid).is_err());
+    }
+    #[test]
     fn integration_schema_four_upgrade_backs_up_preserves_results_and_rolls_back_on_failure() {
         let root = TempRoot::new("social-migration");
         let path = root.path("history.sqlite");
@@ -426,7 +483,9 @@ mod tests {
             node: node.clone(),
             script: root.path("adapter.cjs"),
         };
-        let payload = snapshot(123);
+        let mut payload = snapshot(123);
+        payload.fetchary_version = "2.0.7".into();
+        payload.data["metrics"]["score"] = Value::Null;
         let reply =
             serde_json::json!({"fetchary_version":payload.fetchary_version,"data":payload.data});
         fs::write(&node, format!("#!/bin/sh\nprintf '%s' '{}'", reply)).unwrap();

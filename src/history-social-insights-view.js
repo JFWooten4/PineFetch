@@ -11,6 +11,7 @@ const labels = {
     following: 'Following',
     posts: 'Posts',
     subscribers: 'Subscribers',
+    score: 'Score',
 };
 const reasons = {
     unsupported: 'Not supported',
@@ -72,9 +73,10 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
         };
         const entries = Object.entries(labels).filter(
             ([name]) =>
-                !profileMetrics ||
-                ['followers', 'following', 'posts', 'subscribers'].includes(name) ||
-                Number.isSafeInteger(content.data.metrics[name])
+                (name !== 'score' || Number.isSafeInteger(content.data.metrics[name])) &&
+                (!profileMetrics ||
+                    ['followers', 'following', 'posts', 'subscribers'].includes(name) ||
+                    Number.isSafeInteger(content.data.metrics[name]))
         );
         if (profileMetrics)
             entries.sort(
@@ -85,7 +87,7 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
         let missing = 0;
         for (const [name, label] of entries) {
             const count = content.data.metrics[name];
-            const available = Number.isSafeInteger(count) && count >= 0;
+            const available = Number.isSafeInteger(count) && (count >= 0 || name === 'score');
             if (profileMetrics && !available) {
                 missing += 1;
                 const term = document.createElement('dt');
@@ -102,7 +104,7 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
             heading.textContent = label;
             const value = document.createElement('p');
             value.className = 'oj-heading-2 oj-mono';
-            value.textContent = Number.isSafeInteger(count) && count >= 0 ? count.toLocaleString() : '—';
+            value.textContent = available ? count.toLocaleString() : '—';
             const detail = document.createElement('p');
             detail.className = 'oj-helper';
             detail.textContent =
@@ -110,7 +112,9 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
                     ? missingReason(name)
                     : content.data.sources[name]?.approximate
                       ? 'Approximate public count'
-                      : 'Public count';
+                      : name === 'score'
+                        ? 'Public score'
+                        : 'Public count';
             card.append(heading, value, detail);
             els.historySocialMetrics.append(card);
         }

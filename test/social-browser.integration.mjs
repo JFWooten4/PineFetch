@@ -11,20 +11,24 @@ const { loadSocialInsights } = requireRuntime('./social-insights.cjs');
 const { launchBundledBrowser, verifyBrowserRuntime } = requireRuntime('./social-browser.cjs');
 const { extractSocialInsights } = requireRuntime('fetchary');
 
-const capture = async (url, html) => {
+const capture = async (url, html, failingResource = null) => {
     let launches = 0;
     let browser;
+    const modes = [];
     const result = await loadSocialInsights(
         url,
-        (target, options) =>
-            extractSocialInsights(target, {
+        (target, options) => {
+            modes.push(options.mode);
+            return extractSocialInsights(target, {
                 ...options,
                 lookup: async () => [{ address: '93.184.216.34', family: 4 }],
                 fetch: async target => {
                     assert.equal(new URL(target).origin, new URL(url).origin);
+                    if (new URL(target).pathname === failingResource) throw new Error('Fixture resource failure');
                     return new Response(html, { headers: { 'content-type': 'text/html' } });
                 },
-            }),
+            });
+        },
         async options => {
             launches++;
             browser = await launchBundledBrowser(options);
@@ -32,6 +36,7 @@ const capture = async (url, html) => {
         }
     );
     assert.equal(launches, 1);
+    assert.deepEqual(modes, failingResource ? ['browser', 'http'] : ['browser']);
     assert.equal(browser.connected, false, 'Fetchary must close its browser after extraction');
     return result;
 };
@@ -67,6 +72,19 @@ test('bundled browser extracts TikTok profile counts from the public handle', as
     assert.equal(result.data.metrics.following, 30);
     assert.equal(result.data.metrics.posts, 858);
     assert.equal(result.data.metrics.subscribers, null);
+});
+
+test('Instagram resource failure closes Chromium and retains public metrics through HTTP fallback', async () => {
+    const target = 'https://www.instagram.com/reel/DeCHfZaMmPc/';
+    const html = (
+        await readFile(new URL('./fixtures/social-insights/instagram-reel.html', import.meta.url), 'utf8')
+    ).replace('</head>', '<script src="/broken-resource.js"></script></head>');
+    const result = await capture(target, html, '/broken-resource.js');
+    assert.equal(result.data.kind, 'video');
+    assert.equal(result.data.status, 'partial');
+    assert.equal(result.data.metrics.likes, 9);
+    assert.equal(result.data.metrics.comments, 2);
+    assert.equal(result.data.metrics.score, null);
 });
 
 test('the relocated native runtime launches from an unrelated working directory', async () => {

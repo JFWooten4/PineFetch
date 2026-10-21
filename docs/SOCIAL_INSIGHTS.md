@@ -13,7 +13,8 @@ committed snapshot. Repeated clicks cannot start duplicate requests for the
 same entry in one app instance.
 
 The UI shows views, likes, comments, shares, saves, followers, following, posts
-and subscribers. Supported fields depend on the platform and URL kind. A known
+and subscribers, plus Reddit's score when available. Scores can be negative;
+ordinary counts cannot. Supported fields depend on the platform and URL kind. A known
 zero remains **0**. Unknown values remain **—**, with their availability reason.
 Approximate public counts are labeled. The footer records fetch time and platform. The Fetchary version is retained
 with the stored snapshot. These are saved snapshots, not continuously live counters.
@@ -25,6 +26,12 @@ lockfile. It explicitly uses **browser mode**, a 20-second per-phase timeout,
 a 5-second post-load wait, a 64 MiB page/resource limit and `cacheTtlMs: 0`. Each deliberate refresh performs a fresh capture. Fetchary
 owns platform recognition, public-page extraction, redirect/identity checks and
 private-network restrictions. PineFetch does not duplicate its platform parsers.
+
+If a browser resource fails, PineFetch retries the original URL using Fetchary's
+HTTP mode with the same timeout, page-size limit, identity checks and disabled
+cache. It accepts that fallback only when public metrics are available. A failed
+or empty fallback preserves the previous snapshot. Browser launch/runtime errors
+and ordinary transport failures do not trigger this retry.
 
 Each explicit load renders the public page in bundled headless Chromium, including
 JavaScript and supported consent-overlay handling. Chromium uses a fresh temporary
@@ -67,7 +74,9 @@ to a History entry through a cascading foreign key and contains:
 
 Only normalized insights are stored; page HTML, authentication material and
 Fetchary CLI history are not saved. Output and storage are limited to 256 KiB.
-Metric counts must be nonnegative safe integers or null. A save rechecks the
+Metric counts must be nonnegative safe integers or null. The optional `score`
+field also accepts negative safe integers; older snapshots without it remain valid.
+A save rechecks the
 History entry and its URL inside one SQLite transaction, so a deleted or changed
 entry cannot be recreated or updated by a late response. History deletion/clearing
 cascades to the snapshot. Fetching does not modify the video, transcript or OCR.

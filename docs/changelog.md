@@ -4,6 +4,7 @@
 - Fixed TikTok account insights to use the public uploader URL instead of an internal account ID, retry unavailable saved addresses on refresh and preserve previous insights when account identity cannot be verified.
 - Replaced platform names in individual History items with available Font Awesome brand icons, keeping names as tooltips and screen-reader text and a visible name for platforms without an icon.
 - Replaced History detail and account Back buttons with accessible History / Account / Post breadcrumbs, preserving list filters, loaded rows and scroll position and truncating long labels.
+- Fixed Instagram Social Insights when browser background requests fail by retrying public metadata through Fetchary HTTP extraction; added compatibility with Fetchary 2.0.7's optional signed Reddit score while retaining older snapshots.
 
 # 2.5.0
 

@@ -57,6 +57,7 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
         releaseKeywords: null,
         failKeywords: false,
         socialFetches: 0,
+        socialScore: null,
         holdSocial: false,
         releaseSocial: null,
         failSocial: false,
@@ -345,6 +346,7 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
                 ];
                 const metrics = Object.fromEntries(names.map(name => [name, null]));
                 if (!ui.unsupportedSocial) Object.assign(metrics, { views: 12345, likes: 0, comments: 56 });
+                if (Number.isSafeInteger(ui.socialScore)) metrics.score = ui.socialScore;
                 const result = {
                     history_entry_id: args.id,
                     source_url: 'https://www.youtube.com/watch?v=fixture',
@@ -2567,7 +2569,30 @@ try {
             await page.setViewportSize({ width: 800, height: 960 });
             assert(await page.locator('#historySocialPanel').evaluate(el => el.scrollWidth <= el.clientWidth));
             await page.setViewportSize({ width: 1400, height: 960 });
+            for (const score of [-3, 0]) {
+                await page.evaluate(value => {
+                    globalThis.__pinefetchUi.socialScore = value;
+                }, score);
+                await page.locator('#historySocialLoadBtn').click();
+                const card = page
+                    .locator('#historySocialMetrics .pinefetch-social-metric')
+                    .filter({ has: page.getByRole('heading', { name: 'Score', exact: true }) });
+                await page.waitForFunction(
+                    value =>
+                        [
+                            ...globalThis.document.querySelectorAll('#historySocialMetrics .pinefetch-social-metric'),
+                        ].some(
+                            card =>
+                                card.querySelector('h3').textContent === 'Score' &&
+                                card.querySelector('.oj-heading-2').textContent === String(value)
+                        ),
+                    score
+                );
+                assert.equal(await card.locator('.oj-heading-2').textContent(), String(score));
+                assert.match(await card.innerText(), /Public score/);
+            }
             await page.evaluate(() => {
+                globalThis.__pinefetchUi.socialScore = null;
                 globalThis.__pinefetchUi.unsupportedSocial = true;
             });
             await page.locator('#historySocialLoadBtn').click();
