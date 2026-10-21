@@ -136,7 +136,7 @@ pub(super) fn next_link_dump_secret_name(conn: &Connection) -> rusqlite::Result<
 
 pub(super) fn generate_link_dump_secret_value() -> Result<String, String> {
     let mut bytes = [0_u8; 32];
-    getrandom::getrandom(&mut bytes).map_err(|e| format!("Secret generation failed: {e}"))?;
+    getrandom::fill(&mut bytes).map_err(|e| format!("Secret generation failed: {e}"))?;
     Ok(format!("pfld_{}", URL_SAFE_NO_PAD.encode(bytes)))
 }
 

@@ -2,6 +2,7 @@
 
 - updated deps
 - Aligned the macOS Dock menu's muda dependency with Tauri at 0.20.0 so menu events share one dispatcher.
+- Updated Link Dump secret generation to the getrandom 0.4 API.
 
 # 2.5.1
 
