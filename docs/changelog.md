@@ -1,3 +1,8 @@
+# 2.5.2
+
+- updated deps
+- Aligned the macOS Dock menu's muda dependency with Tauri at 0.20.0 so menu events share one dispatcher.
+
 # 2.5.1
 
 - Removed the extra View account button from History details; accounts remain accessible through breadcrumbs and the Creator link in Overview.
