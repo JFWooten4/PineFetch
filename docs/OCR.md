@@ -4,7 +4,7 @@ Open a History entry to use its full-container detail workspace, or right-click
 and choose **Open OCR** to select **OCR Text** directly. Opening the tab never
 starts analysis. **Start OCR Analysis**, **Run OCR Again**, **Retry Analysis** and
 **Start Again** explicitly start a job. One analysis may run at a time.
-**Back to History**, other tabs and the global navigation leave it running;
+The **History** breadcrumb, other tabs and the global navigation leave it running;
 **Cancel Analysis** is the only navigation-independent cancellation action.
 History preserves its query, filters, loaded entries and scroll position.
 The header displays the thumbnail during analysis and after completion.

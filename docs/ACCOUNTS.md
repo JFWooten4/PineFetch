@@ -3,9 +3,13 @@
 Open a History entry, then click **View account** beside the platform or click
 its Creator in Overview. The Account view lists that creator's saved downloads,
 with **Load more saved videos** for accounts with more than 20 entries. A saved
-video opens its existing details; Back returns to the account. **Back to video**
-returns to the entry from which the account was opened. History search, filters
-and scroll position are retained.
+video opens its existing details. Breadcrumbs show **History / Account** on an
+account page and **History / Account / Post title** on a saved post, including
+posts opened directly from History. Click the account breadcrumb to open its
+saved downloads or **History** to return to the list with search, filters,
+loaded entries and scroll position retained. The current page is plain text;
+long names and titles are truncated with their full text available as a tooltip.
+Posts without a saved creator omit the account breadcrumb.
 
 Saved downloads are grouped by the exact stored creator name and platform, as
 with History's existing creator filter. Similar names and names on different
@@ -22,6 +26,13 @@ explicit. Available values, zeroes and missing reasons are displayed using the
 same cards as video Social Insights. Account cards focus on followers, following,
 posts and subscribers, show other metrics when available, and put available counts first. YouTube account insights have Fetchary's
 `channel` kind; other supported profiles use `profile`.
+
+For TikTok, PineFetch prefers `uploader_url`, which contains the public handle;
+yt-dlp's `channel_url` can contain an internal account ID that the public page
+does not expose as its handle. Refreshing unavailable insights resolves the
+profile address again, including snapshots saved with that internal ID.
+An identity mismatch preserves the previous snapshot instead of saving the
+failed result.
 
 Opening an account only reads SQLite. Saved snapshots remain readable offline
 and after restarting PineFetch. A failed request, failed write or changed/deleted

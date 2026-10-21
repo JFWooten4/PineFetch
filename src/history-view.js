@@ -31,9 +31,7 @@ export const createHistoryView = ({
         historyExactUser: false,
         historyClearing: false,
         page: 'list',
-        selectedId: null,
-        accountEntryId: null,
-        detailsReturnPage: 'list',
+        historyReturnId: null,
         scrollTop: 0,
     });
     const historyPageSize = 20;
@@ -53,6 +51,22 @@ export const createHistoryView = ({
     ]);
     const sourceChoice = createDropdownChoice({ menu: els.historySourceMenu, value: els.historySourceValue });
     sourceChoice.setOptions([{ value: '', label: 'All sources' }]);
+    const returnToHistory = returnFocus => {
+        historyDetailsView.leave();
+        accountView.leave();
+        state.page = 'list';
+        activate();
+        void renderHistory().then(() => {
+            if (state.page !== 'list' || !isActive()) return;
+            els.historyList.scrollTop = state.scrollTop;
+            const row = [...els.historyList.children].find(item => item.dataset.historyId === state.historyReturnId);
+            const target =
+                returnFocus && els.historyList.contains(returnFocus)
+                    ? returnFocus
+                    : row?.querySelector('.pinefetch-history-open-btn') || els.historySearchInput;
+            target.focus({ preventScroll: true });
+        });
+    };
     const historyDetailsView = createHistoryDetailsView({
         els,
         api,
@@ -63,40 +77,21 @@ export const createHistoryView = ({
         showSavedVideosByCreator: creator => showSavedVideosByCreator(creator),
         jobs,
         openAccount: id => {
-            state.accountEntryId = id;
-            state.detailsReturnPage = 'list';
             historyDetailsView.leave();
             state.page = 'account';
             activate();
             accountView.open(id);
         },
         navigateToDetails: id => {
-            if (state.page === 'list') state.scrollTop = els.historyList.scrollTop;
-            state.detailsReturnPage = state.page === 'account' ? 'account' : 'list';
-            els.historyDetailsBackBtn.querySelector('[data-history-back-label]').textContent =
-                state.detailsReturnPage === 'account' ? 'Back to account' : 'Back to History';
-            state.page = 'detail';
-            state.selectedId = id;
-            activate();
-        },
-        navigateToHistory: returnFocus => {
-            historyDetailsView.leave();
-            if (state.detailsReturnPage === 'account') {
-                state.page = 'account';
-                activate();
-                accountView.open(state.accountEntryId);
-                return;
+            if (state.page === 'list') {
+                state.scrollTop = els.historyList.scrollTop;
+                state.historyReturnId = id;
             }
             accountView.leave();
-            state.page = 'list';
-            state.selectedId = null;
+            state.page = 'detail';
             activate();
-            void renderHistory().then(() => {
-                els.historyList.scrollTop = state.scrollTop;
-                if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
-                else els.historySearchInput.focus({ preventScroll: true });
-            });
         },
+        navigateToHistory: returnToHistory,
     });
 
     const accountView = createHistoryAccountView({
@@ -105,13 +100,7 @@ export const createHistoryView = ({
         appendLog,
         prepareDownload,
         openVideo: (id, button) => void historyDetailsView.open(id, button),
-        back: () => {
-            const id = state.accountEntryId;
-            accountView.leave();
-            state.page = 'detail';
-            state.detailsReturnPage = 'list';
-            void historyDetailsView.open(id, els.historySearchInput);
-        },
+        navigateToHistory: () => returnToHistory(),
     });
 
     const activate = () => {
@@ -286,9 +275,21 @@ export const createHistoryView = ({
         meta.className = 'pinefetch-history-meta';
         const dateStr = formatHistoryDate(entry.completed_at);
         const source = entry.source || entry.platform || detectPlatform(entry.url) || 'unknown';
+        const sourceLabel = document.createElement('span');
+        sourceLabel.className = 'pinefetch-history-platform';
+        sourceLabel.title = formatHistorySource(source);
+        const sourceIcon = createPlatformIcon(source);
+        if (sourceIcon) {
+            const name = document.createElement('span');
+            name.className = 'oj-sr-only';
+            name.textContent = sourceLabel.title;
+            sourceLabel.append(sourceIcon, name);
+        } else {
+            sourceLabel.textContent = sourceLabel.title;
+        }
+        meta.appendChild(sourceLabel);
         const uploadDate = formatUploadTimestamp(entry.timestamp) || formatUploadDate(entry.upload_date);
         appendTextSpans(meta, [
-            source,
             entry.medium || '',
             entry.uploader ? `by ${entry.uploader}` : '',
             entry.filename || '',

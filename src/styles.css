@@ -547,8 +547,31 @@ body {
     overflow: hidden;
 }
 
-.pinefetch-history-back {
-    align-self: start;
+.pinefetch-history-breadcrumb,
+.pinefetch-history-breadcrumb ol,
+.pinefetch-history-breadcrumb li {
+    min-width: 0;
+}
+
+.pinefetch-history-breadcrumb ol {
+    width: 100%;
+    flex-wrap: nowrap;
+}
+
+.pinefetch-history-breadcrumb li:first-child {
+    flex-shrink: 0;
+}
+
+.pinefetch-breadcrumb-account {
+    max-width: 40%;
+}
+
+.pinefetch-breadcrumb-account .oj-button {
+    min-width: 0;
+}
+
+.pinefetch-breadcrumb-current {
+    flex: 1;
 }
 
 .pinefetch-history-details-body {
@@ -1068,6 +1091,10 @@ body {
     .pinefetch-history-details-view:has(#historyOcrPanel:not([hidden])) {
         padding: var(--oj-space-3);
         gap: var(--oj-space-2);
+    }
+
+    #historyOcrPanel:not([hidden]) {
+        padding-top: var(--oj-space-1);
     }
 
     .pinefetch-ocr-meta {

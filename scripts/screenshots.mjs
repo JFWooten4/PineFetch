@@ -177,7 +177,7 @@ try {
     await page.locator('#historyShowMoreDataBtn').click();
     await page.locator('#historyDetailsContent').waitFor({ state: 'visible' });
     await capture('more_data.webp');
-    await page.locator('#historyDetailsBackBtn').click();
+    await page.locator('#historyDetailsHistoryBtn').click();
 
     const ocrHistoryId = `history-${videos.findIndex(video => video.url === ocr.url) + 1}`;
     await page.locator(`[data-history-id="${ocrHistoryId}"] .pinefetch-history-open-btn`).click({ button: 'right' });
@@ -219,9 +219,8 @@ try {
         () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 1
     );
     await capture('account.webp');
-    await page.locator('#historyAccountBackBtn').click();
-    await page.locator('#historyDetailsContent').waitFor();
-    await page.locator('#historyDetailsBackBtn').click();
+    await page.locator('#historyAccountHistoryBtn').click();
+    await page.locator('#historyView').waitFor();
 
     await page.locator('#viewLinkDumpBtn').click();
     await page.waitForFunction(

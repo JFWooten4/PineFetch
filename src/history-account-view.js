@@ -2,7 +2,7 @@ import { formatHistorySource } from './formatters.js';
 import { createHistorySocialInsightsView } from './history-social-insights-view.js';
 import { createPlatformIcon } from './platform-icons.js';
 
-export const createHistoryAccountView = ({ els, api, appendLog, openVideo, back, prepareDownload }) => {
+export const createHistoryAccountView = ({ els, api, appendLog, openVideo, navigateToHistory, prepareDownload }) => {
     const state = {
         id: null,
         request: 0,
@@ -117,6 +117,8 @@ export const createHistoryAccountView = ({ els, api, appendLog, openVideo, back,
             if (state.id !== id || state.request !== request) return;
             const total = page.saved.total_count.toLocaleString();
             els.historyAccountTitle.textContent = page.uploader;
+            els.historyAccountBreadcrumbCurrent.textContent = page.uploader;
+            els.historyAccountBreadcrumbCurrent.title = page.uploader;
             els.historyAccountMeta.textContent = formatHistorySource(page.source);
             const platformIcon = createPlatformIcon(page.source);
             if (platformIcon) els.historyAccountMeta.prepend(platformIcon);
@@ -138,7 +140,7 @@ export const createHistoryAccountView = ({ els, api, appendLog, openVideo, back,
                     els.historyAccountStatus,
                     append
                         ? 'More saved downloads could not be loaded. Try again.'
-                        : 'The account could not be loaded. Try again or return to the video.',
+                        : 'The account could not be loaded. Try again or return to History.',
                     true
                 );
                 els.historyAccountRetryBtn.hidden = append;
@@ -267,6 +269,8 @@ export const createHistoryAccountView = ({ els, api, appendLog, openVideo, back,
         setProfile('');
         els.historyAccountOpenBtn.setAttribute('aria-busy', 'false');
         els.historyAccountTitle.textContent = 'Account';
+        els.historyAccountBreadcrumbCurrent.textContent = 'Account';
+        els.historyAccountBreadcrumbCurrent.removeAttribute('title');
         els.historyAccountMeta.textContent = 'Loading';
         els.historyAccountSummary.textContent = '';
         els.historyAccountSavedCount.textContent = '';
@@ -279,11 +283,11 @@ export const createHistoryAccountView = ({ els, api, appendLog, openVideo, back,
         social.reset(id);
         renderDiscovery();
         void loadSaved();
-        els.historyAccountBackBtn.focus({ preventScroll: true });
+        els.historyAccountTitle.focus({ preventScroll: true });
     };
     const bindEvents = () => {
         social.bindEvents();
-        els.historyAccountBackBtn.addEventListener('click', back);
+        els.historyAccountHistoryBtn.addEventListener('click', navigateToHistory);
         els.historyAccountRetryBtn.addEventListener('click', () => void loadSaved());
         els.historyAccountMoreSavedBtn.addEventListener('click', () => void loadSaved(true));
         els.historyAccountVideosBtn.addEventListener('click', () => void loadVideos());

@@ -64,6 +64,12 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
             els.historySocialUnavailableList.replaceChildren();
         }
         if (!content) return;
+        const missingReason = name => {
+            const reason = content.data.unavailable[name];
+            return reason === 'identity_mismatch' && profileMetrics
+                ? 'Account identity could not be verified'
+                : reasons[reason] || 'Unavailable';
+        };
         const entries = Object.entries(labels).filter(
             ([name]) =>
                 !profileMetrics ||
@@ -85,7 +91,7 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
                 const term = document.createElement('dt');
                 term.textContent = label;
                 const detail = document.createElement('dd');
-                detail.textContent = reasons[content.data.unavailable[name]] || 'Unavailable';
+                detail.textContent = missingReason(name);
                 els.historySocialUnavailableList.append(term, detail);
                 continue;
             }
@@ -101,7 +107,7 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
             detail.className = 'oj-helper';
             detail.textContent =
                 count === null || count === undefined
-                    ? reasons[content.data.unavailable[name]] || 'Unavailable'
+                    ? missingReason(name)
                     : content.data.sources[name]?.approximate
                       ? 'Approximate public count'
                       : 'Public count';
@@ -162,17 +168,19 @@ export const createHistorySocialInsightsView = ({ els, api, appendLog, profileMe
                 if (id === state.id && request === state.request) {
                     const message = /runtime|reinstall/i.test(String(error))
                         ? 'Social Insights tools are unavailable. Rebuild or reinstall PineFetch.'
-                        : /verified account|account URL/i.test(String(error))
-                          ? 'The platform did not expose a verified account address for this video.'
-                          : /profile browsing is unavailable/i.test(String(error))
-                            ? 'Account insights are unavailable for this platform.'
-                            : /already loading/i.test(String(error))
-                              ? 'This account is already loading. Please wait and try again.'
-                              : /platform blocked/i.test(String(error))
-                                ? 'The platform blocked this request. Try again later.'
-                                : /requires sign-in/i.test(String(error))
-                                  ? 'The platform requires sign-in to expose these metrics.'
-                                  : 'Social Insights could not be loaded. Check your connection and try again.';
+                        : /account identity/i.test(String(error))
+                          ? 'The account identity could not be verified.'
+                          : /verified account|account URL/i.test(String(error))
+                            ? 'The platform did not expose a verified account address for this video.'
+                            : /profile browsing is unavailable/i.test(String(error))
+                              ? 'Account insights are unavailable for this platform.'
+                              : /already loading/i.test(String(error))
+                                ? 'This account is already loading. Please wait and try again.'
+                                : /platform blocked/i.test(String(error))
+                                  ? 'The platform blocked this request. Try again later.'
+                                  : /requires sign-in/i.test(String(error))
+                                    ? 'The platform requires sign-in to expose these metrics.'
+                                    : 'Social Insights could not be loaded. Check your connection and try again.';
                     state.error = `${message}${state.content ? ' Previously saved data is still shown.' : ''}`;
                 }
             } finally {

@@ -1,6 +1,6 @@
 {
     "name": "pinefetch",
-    "version": "2.5.0",
+    "version": "2.5.1",
     "scripts": {
         "check": "npm run check:versions && npm run lint && npm run format:check && npm test",
         "check:versions": "node scripts/check-versions.mjs",
@@ -41,15 +41,15 @@
         "test:social-browser": "node --test --test-timeout=60000 test/social-browser.integration.mjs"
     },
     "engines": {
-        "node": "26.10.0"
+        "node": "^26.10.0"
     },
     "devDependencies": {
         "@eslint/js": "10.0.1",
-        "@tauri-apps/cli": "^2.11.4",
-        "eslint": "10.12.0",
+        "@tauri-apps/cli": "^2.12.3",
+        "eslint": "10.13.0",
         "globals": "17.13.0",
-        "playwright": "1.63.0",
-        "prettier": "3.9.9",
+        "playwright": "1.64.1",
+        "prettier": "3.9.10",
         "sharp": "0.35.5"
     },
     "contributors": [
@@ -70,8 +70,8 @@
     "homepage": "https://oliverjessner.at/pinefetch",
     "dependencies": {
         "@puppeteer/browsers": "3.2.5",
-        "fetchary": "2.0.4",
-        "oj-designsystem": "0.1.0",
+        "fetchary": "2.0.7",
+        "oj-designsystem": "0.2.1",
         "puppeteer-core": "25.14.0"
     }
 }

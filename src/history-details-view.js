@@ -321,13 +321,18 @@ export const createHistoryDetailsView = ({
         keywordsView.reset(entryId);
         navigateToDetails(entryId);
         els.historyDetailsTitle.textContent = 'Video Details';
+        els.historyDetailsBreadcrumbCurrent.textContent = 'Video Details';
+        els.historyDetailsBreadcrumbCurrent.removeAttribute('title');
+        els.historyDetailsAccountCrumb.hidden = true;
+        els.historyDetailsBreadcrumbAccount.textContent = '';
+        els.historyDetailsAccountBreadcrumbBtn.removeAttribute('title');
         els.historyDetailsSubtitle.textContent = '';
         els.historyDetailsAccountBtn.hidden = true;
         els.historyDetailsThumbnail.hidden = true;
         els.historyDetailsThumbnail.removeAttribute('src');
         els.historyDetailsHeader.classList.add('pinefetch-no-media');
         els.historyDetailsStatus.textContent = 'Loading details...';
-        els.historyDetailsBackBtn.focus({ preventScroll: true });
+        els.historyDetailsTitle.focus({ preventScroll: true });
 
         try {
             const details = await api.getHistoryDetails({ id: entryId });
@@ -340,14 +345,20 @@ export const createHistoryDetailsView = ({
             state.details = details;
             const title = details.entry?.title || details.entry?.filename || 'History entry';
             els.historyDetailsTitle.textContent = title;
+            els.historyDetailsBreadcrumbCurrent.textContent = title;
+            els.historyDetailsBreadcrumbCurrent.title = title;
             els.historyDetailsSubtitle.textContent = [
                 formatHistorySource(details.entry?.source || detectPlatform(details.entry?.url)),
             ]
                 .filter(Boolean)
                 .join(' · ');
             const account = details.entry?.uploader;
+            const hasAccount = Boolean(account && (details.entry?.source || detectPlatform(details.entry?.url)));
+            els.historyDetailsBreadcrumbAccount.textContent = account || '';
+            els.historyDetailsAccountBreadcrumbBtn.title = account || '';
+            els.historyDetailsAccountCrumb.hidden = !hasAccount;
             els.historyDetailsAccountBtn.textContent = account ? `View account: ${account}` : '';
-            els.historyDetailsAccountBtn.hidden = !account || !details.entry?.source;
+            els.historyDetailsAccountBtn.hidden = !hasAccount;
             if (details.entry?.thumbnail) {
                 els.historyDetailsThumbnail.src = details.entry.thumbnail;
                 els.historyDetailsThumbnail.hidden = false;
@@ -486,7 +497,10 @@ export const createHistoryDetailsView = ({
         els.historyDetailsAccountBtn.addEventListener('click', () => {
             if (state.details?.entry?.id) openAccount(state.details.entry.id, els.historyDetailsAccountBtn);
         });
-        els.historyDetailsBackBtn.addEventListener('click', () => navigateToHistory(state.returnFocus));
+        els.historyDetailsAccountBreadcrumbBtn.addEventListener('click', () => {
+            if (state.details?.entry?.id) openAccount(state.details.entry.id, els.historyDetailsAccountBreadcrumbBtn);
+        });
+        els.historyDetailsHistoryBtn.addEventListener('click', () => navigateToHistory(state.returnFocus));
         els.historyDetailsThumbnail.addEventListener('error', () => {
             els.historyDetailsThumbnail.hidden = true;
             els.historyDetailsHeader.classList.add('pinefetch-no-media');

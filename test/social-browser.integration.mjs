@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -54,6 +54,19 @@ test('video insights read metrics that appear only after browser JavaScript exec
     const result = await capture(target, html);
     assert.equal(result.data.kind, 'video');
     assert.equal(result.data.metrics.views, 321);
+});
+
+test('bundled browser extracts TikTok profile counts from the public handle', async () => {
+    const target = 'https://www.tiktok.com/@creator';
+    const html = await readFile(new URL('./fixtures/social-insights/tiktok-profile.html', import.meta.url), 'utf8');
+    const result = await capture(target, html);
+    assert.equal(result.data.kind, 'profile');
+    assert.equal(result.data.status, 'available');
+    assert.equal(result.data.url, target);
+    assert.equal(result.data.metrics.followers, 15683);
+    assert.equal(result.data.metrics.following, 30);
+    assert.equal(result.data.metrics.posts, 858);
+    assert.equal(result.data.metrics.subscribers, null);
 });
 
 test('the relocated native runtime launches from an unrelated working directory', async () => {

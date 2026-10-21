@@ -213,12 +213,21 @@ fn resolve_profile(
     deno: Option<&str>,
 ) -> Result<String, String> {
     if let Some(saved) = snapshot(db, ctx)? {
-        return Ok(saved.profile_url);
+        if matches!(saved.data["status"].as_str(), Some("available" | "partial")) {
+            return Ok(saved.profile_url);
+        }
     }
     crate::url_rules::validate_download_url(&ctx.url).map_err(|e| e.to_string())?;
     let raw = crate::metadata::load_raw_info(yt_dlp, deno, &ctx.url, processes)?;
     let data: Value = serde_json::from_str(&raw).map_err(|_| "Invalid account metadata.")?;
-    for field in ["channel_url", "uploader_url"] {
+    // TikTok's channel_url contains the internal secUid, while uploader_url
+    // contains the public handle that Fetchary can verify against the page.
+    let fields = if ctx.source == "tiktok" {
+        ["uploader_url", "channel_url"]
+    } else {
+        ["channel_url", "uploader_url"]
+    };
+    for field in fields {
         if let Some(raw) = data[field].as_str() {
             if let Ok(url) = validate_profile(raw, &ctx.source) {
                 return Ok(url);
@@ -230,6 +239,14 @@ fn resolve_profile(
 fn save(db: &Database, ctx: &Context, saved: AccountSnapshot) -> Result<AccountSnapshot, String> {
     social_insights::validate_data(&saved.fetchary_version, &saved.data)?;
     validate_profile(&saved.profile_url, &ctx.source)?;
+    if saved.data["unavailable"]
+        .as_object()
+        .is_some_and(|reasons| reasons.values().any(|reason| reason == "identity_mismatch"))
+    {
+        return Err(
+            "The account identity could not be verified. Previous insights were preserved.".into(),
+        );
+    }
     if !matches!(saved.data["kind"].as_str(), Some("profile" | "channel")) {
         return Err(
             "The platform did not return account insights. Previous data was preserved.".into(),
@@ -476,6 +493,16 @@ mod tests {
         let mut bad = insight(456);
         bad.data["metrics"]["posts"] = (-1).into();
         assert!(save(&db, &ctx, bad).is_err());
+        let mut bad = insight(456);
+        bad.data["status"] = "unavailable".into();
+        bad.data["unavailable"]["subscribers"] = "identity_mismatch".into();
+        assert!(save(&db, &ctx, bad)
+            .unwrap_err()
+            .contains("account identity could not be verified"));
+        assert_eq!(
+            get(&db, "one", 0).unwrap().insights.unwrap().fetched_at,
+            123
+        );
         db.lock()
             .unwrap()
             .execute(
@@ -590,12 +617,109 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
+    fn integration_tiktok_refresh_resolves_public_handle_and_recovers_legacy_snapshot() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = TempRoot::new("tiktok-account-refresh");
+        let yt = root.path("yt-dlp");
+        let node = root.path("node");
+        let public_url = "https://www.tiktok.com/@creator";
+        let internal_url = "https://www.tiktok.com/@MS4wLjABfixture";
+        let db = db();
+        let mut legacy = insight(123);
+        legacy.source = "tiktok".into();
+        legacy.profile_url = internal_url.into();
+        legacy.data["platform"] = "tiktok".into();
+        legacy.data["url"] = internal_url.into();
+        legacy.data["status"] = "unavailable".into();
+        for name in social_insights::METRICS {
+            legacy.data["metrics"][*name] = Value::Null;
+            legacy.data["unavailable"][*name] = "identity_mismatch".into();
+        }
+        // Earlier versions saved failed secUid results. Seed one without using
+        // save(), which now rejects identity mismatches.
+        db.lock().unwrap().execute(
+            "INSERT INTO history_account_insights(source,uploader,profile_url,fetched_at,fetchary_version,payload_json) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![legacy.source,legacy.uploader,legacy.profile_url,legacy.fetched_at,legacy.fetchary_version,legacy.data.to_string()],
+        ).unwrap();
+        let state = AccountState::default();
+        let processes = ProcessState::default();
+        let tools = SocialInsightsTools {
+            node: node.clone(),
+            script: root.path("adapter.cjs"),
+        };
+        fs::write(&yt, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&yt, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(fetch_insights(
+            &db,
+            &state,
+            &processes,
+            "other",
+            &tools,
+            yt.to_str().unwrap(),
+            None
+        )
+        .is_err());
+        assert_eq!(
+            get(&db, "other", 0).unwrap().insights.unwrap().profile_url,
+            internal_url
+        );
+
+        let metadata = serde_json::json!({"channel_url":internal_url,"uploader_url":public_url});
+        fs::write(&yt, format!("#!/bin/sh\nprintf '%s' '{metadata}'\n")).unwrap();
+        let mut data = legacy.data.clone();
+        data["url"] = public_url.into();
+        data["status"] = "available".into();
+        data["metrics"]["followers"] = 15683.into();
+        data["metrics"]["following"] = 30.into();
+        data["metrics"]["posts"] = 858.into();
+        data["unavailable"] = serde_json::json!({"subscribers":"unsupported"});
+        let reply = serde_json::json!({"fetchary_version":"2.0.6","data":data});
+        fs::write(
+            &node,
+            format!("#!/bin/sh\n[ \"$2\" = '{public_url}' ] || exit 2\nprintf '%s' '{reply}'\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&node, fs::Permissions::from_mode(0o700)).unwrap();
+        let saved = fetch_insights(
+            &db,
+            &state,
+            &processes,
+            "other",
+            &tools,
+            yt.to_str().unwrap(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(saved.profile_url, public_url);
+        assert_eq!(saved.data["metrics"]["followers"], 15683);
+        assert_eq!(saved.data["metrics"]["following"], 30);
+        assert_eq!(saved.data["metrics"]["posts"], 858);
+        assert_eq!(
+            get(&db, "other", 0).unwrap().insights.unwrap().profile_url,
+            public_url
+        );
+        // A successful snapshot still supplies its verified URL without
+        // repeating the metadata request on every subsequent action.
+        fs::write(&yt, "#!/bin/sh\nexit 1\n").unwrap();
+        assert!(fetch_insights(
+            &db,
+            &state,
+            &processes,
+            "other",
+            &tools,
+            yt.to_str().unwrap(),
+            None
+        )
+        .is_ok());
+    }
+    #[cfg(unix)]
+    #[test]
     fn integration_network_actions_use_verified_profile_and_preserve_snapshots_after_failure() {
         use std::os::unix::fs::PermissionsExt;
         let root = TempRoot::new("account-process");
         let yt = root.path("yt-dlp");
         let node = root.path("node");
-        fs::write(&yt,"#!/bin/sh\ncase \"$2\" in --flat-playlist) printf '%s' '{\"entries\":[{\"id\":\"abcdefghijk\",\"title\":\"Public video\"}]}' ;; *) printf '%s' '{\"channel_url\":\"https://www.youtube.com/@creator\"}' ;; esac\n").unwrap();
+        fs::write(&yt,"#!/bin/sh\ncase \"$2\" in --flat-playlist) printf '%s' '{\"entries\":[{\"id\":\"abcdefghijk\",\"title\":\"Public video\"}]}' ;; *) printf '%s' '{\"channel_url\":\"https://www.youtube.com/@creator\",\"uploader_url\":\"https://www.youtube.com/@other\"}' ;; esac\n").unwrap();
         fs::set_permissions(&yt, fs::Permissions::from_mode(0o700)).unwrap();
         let reply = serde_json::json!({"fetchary_version":"2.0.4","data":insight(123).data});
         fs::write(&node,format!("#!/bin/sh\n[ \"$2\" = 'https://www.youtube.com/@creator' ] || exit 2\nprintf '%s' '{}'\n",reply)).unwrap();

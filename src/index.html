@@ -603,13 +603,24 @@
                     aria-labelledby="historyAccountTitle"
                     hidden
                 >
-                    <button
-                        id="historyAccountBackBtn"
-                        class="oj-button oj-button-ghost oj-button-compact pinefetch-history-back"
-                        type="button"
-                    >
-                        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to video
-                    </button>
+                    <nav class="oj-breadcrumb pinefetch-history-breadcrumb" aria-label="Breadcrumb">
+                        <ol>
+                            <li>
+                                <button
+                                    id="historyAccountHistoryBtn"
+                                    class="oj-button oj-button-ghost oj-button-compact"
+                                    type="button"
+                                >
+                                    History
+                                </button>
+                            </li>
+                            <li class="pinefetch-breadcrumb-current">
+                                <span id="historyAccountBreadcrumbCurrent" class="oj-truncate" aria-current="page"
+                                    >Account</span
+                                >
+                            </li>
+                        </ol>
+                    </nav>
                     <header class="pinefetch-account-header">
                         <div class="pinefetch-panel-heading">
                             <div class="oj-inline pinefetch-account-byline">
@@ -785,14 +796,33 @@
                     aria-labelledby="historyDetailsTitle"
                     hidden
                 >
-                    <button
-                        id="historyDetailsBackBtn"
-                        class="oj-button oj-button-ghost pinefetch-history-back"
-                        type="button"
-                    >
-                        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-                        <span data-history-back-label>Back to History</span>
-                    </button>
+                    <nav class="oj-breadcrumb pinefetch-history-breadcrumb" aria-label="Breadcrumb">
+                        <ol>
+                            <li>
+                                <button
+                                    id="historyDetailsHistoryBtn"
+                                    class="oj-button oj-button-ghost oj-button-compact"
+                                    type="button"
+                                >
+                                    History
+                                </button>
+                            </li>
+                            <li id="historyDetailsAccountCrumb" class="pinefetch-breadcrumb-account" hidden>
+                                <button
+                                    id="historyDetailsAccountBreadcrumbBtn"
+                                    class="oj-button oj-button-ghost oj-button-compact"
+                                    type="button"
+                                >
+                                    <span id="historyDetailsBreadcrumbAccount" class="oj-truncate"></span>
+                                </button>
+                            </li>
+                            <li class="pinefetch-breadcrumb-current">
+                                <span id="historyDetailsBreadcrumbCurrent" class="oj-truncate" aria-current="page"
+                                    >Video Details</span
+                                >
+                            </li>
+                        </ol>
+                    </nav>
                     <header id="historyDetailsHeader" class="pinefetch-list-card-layout pinefetch-no-media">
                         <div class="pinefetch-panel-heading">
                             <h2 id="historyDetailsTitle" class="oj-heading-2" tabindex="-1">Video Details</h2>
@@ -800,7 +830,7 @@
                                 <span id="historyDetailsSubtitle" class="oj-muted"></span>
                                 <button
                                     id="historyDetailsAccountBtn"
-                                    class="oj-button oj-button-ghost pinefetch-account-link"
+                                    class="oj-button oj-button-secondary oj-button-compact"
                                     type="button"
                                     hidden
                                 ></button>

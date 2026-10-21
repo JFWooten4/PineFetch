@@ -5,6 +5,7 @@ import { test } from 'node:test';
 const require = createRequire(import.meta.url);
 const { loadSocialInsights } = require('../native/social-insights.cjs');
 const { extractSocialInsights } = require('fetchary');
+const { dependencies } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const url = 'https://www.youtube.com/watch?v=AbC123';
 
 test('Fetchary library extracts only matching public video metrics and preserves zero and unavailable values', async () => {
@@ -31,7 +32,7 @@ test('Fetchary library extracts only matching public video metrics and preserves
         });
     });
     assert.equal(requests, 1);
-    assert.equal(result.fetchary_version, '2.0.4');
+    assert.equal(result.fetchary_version, dependencies.fetchary);
     assert.equal(result.data.metrics.views, 12345);
     assert.equal(result.data.metrics.likes, 0);
     assert.equal(result.data.metrics.comments, 56);
@@ -72,4 +73,25 @@ test('the same Fetchary adapter extracts account metrics with channel identity, 
     assert.equal(result.data.metrics.subscribers, 0);
     assert.equal(result.data.metrics.views, null);
     assert.equal(result.data.url, target);
+});
+
+test('TikTok public handles return profile counts and exclude other accounts in the page', async () => {
+    const target = 'https://www.tiktok.com/@creator';
+    const html = await readFile(new URL('./fixtures/social-insights/tiktok-profile.html', import.meta.url), 'utf8');
+    const result = await loadSocialInsights(target, (url, options) =>
+        extractSocialInsights(url, {
+            ...options,
+            mode: 'http',
+            lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+            fetch: async () => new Response(html, { headers: { 'content-type': 'text/html' } }),
+        })
+    );
+    assert.equal(result.data.kind, 'profile');
+    assert.equal(result.data.status, 'available');
+    assert.equal(result.data.url, target);
+    assert.equal(result.data.metrics.followers, 15683);
+    assert.equal(result.data.metrics.following, 30);
+    assert.equal(result.data.metrics.posts, 858);
+    assert.equal(result.data.metrics.subscribers, null);
+    assert.equal(result.data.unavailable.subscribers, 'unsupported');
 });

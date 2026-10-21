@@ -281,6 +281,7 @@ const installUiResponses = ({ fallbackFrame, playlistVideos, keywordFixture }) =
                         Object.keys(snapshot.data.metrics).map(name => [name, null])
                     );
                     snapshot.data.status = 'unavailable';
+                    snapshot.data.unavailable.followers = 'identity_mismatch';
                 }
                 ui.accountRecords[account.uploader] = snapshot;
                 return structuredClone(snapshot);
@@ -1035,7 +1036,18 @@ try {
             assert(await page.locator('#viewDownloadBtn').isVisible());
             const fullContainer = await page.locator('#historyDetailsView').boundingBox();
             assert(fullContainer.width >= 900);
-            await page.locator('#historyDetailsBackBtn').click();
+            assert.equal(await page.locator('#historyDetailsBreadcrumbAccount').textContent(), 'Blender');
+            assert.equal(await page.locator('#historyDetailsBreadcrumbCurrent').textContent(), 'Blender tutorial 24');
+            assert.equal(await page.locator('#historyDetailsBreadcrumbCurrent').getAttribute('aria-current'), 'page');
+            assert.equal(await page.locator('#historyDetailsBreadcrumbCurrent').evaluate(el => el.tagName), 'SPAN');
+            await page.locator('#historyDetailsAccountBreadcrumbBtn').focus();
+            await page.keyboard.press('Enter');
+            await page.waitForFunction(
+                () => globalThis.document.querySelector('#historyAccountBreadcrumbCurrent').textContent === 'Blender'
+            );
+            assert.equal(await page.locator('#historyAccountBreadcrumbCurrent').getAttribute('aria-current'), 'page');
+            await page.locator('#historyAccountHistoryBtn').focus();
+            await page.keyboard.press('Enter');
             await page.locator('#historyView').waitFor();
             assert.equal(await searchInput.inputValue(), 'Blender');
             assert.equal(await page.locator('#historySourceValue').textContent(), 'YouTube');
@@ -1103,6 +1115,13 @@ try {
             await page.keyboard.press('Escape');
             await page.locator('#historyContextMenu').waitFor({ state: 'hidden' });
 
+            await page.locator('[data-history-id="missing-name"] .pinefetch-history-open-btn').click();
+            await page.locator('#historyDetailsContent').waitFor();
+            assert(await page.locator('#historyDetailsAccountCrumb').isHidden());
+            assert.equal(await page.locator('#historyDetailsView .oj-breadcrumb li:visible').count(), 2);
+            await page.locator('#historyDetailsHistoryBtn').click();
+            await page.locator('#historyView').waitFor();
+
             // Restore the standard history fixtures for the detail and deletion checks.
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.setHistoryEntries(null);
@@ -1150,7 +1169,7 @@ try {
                 ),
                 1
             );
-            await page.locator('#historyDetailsBackBtn').click();
+            await page.locator('#historyDetailsHistoryBtn').click();
             await page.locator('#historyDetailsView').waitFor({ state: 'hidden' });
             await page.waitForFunction(
                 () =>
@@ -1169,7 +1188,7 @@ try {
                 await page.locator('#historyTranscriptStatus').textContent(),
                 'No transcript is saved for this video.'
             );
-            await page.locator('#historyDetailsBackBtn').click();
+            await page.locator('#historyDetailsHistoryBtn').click();
             await page.locator('#historyDetailsView').waitFor({ state: 'hidden' });
 
             // OCR is lazy, safe text, explicitly cancellable, and entry/request scoped.
@@ -1223,7 +1242,7 @@ try {
                 );
             };
             const closeDetails = async () => {
-                await page.locator('#historyDetailsBackBtn').click();
+                await page.locator('#historyDetailsHistoryBtn').click();
                 await page.locator('#historyDetailsView').waitFor({ state: 'hidden' });
             };
             const expectOcrStatus = status =>
@@ -2285,7 +2304,9 @@ try {
             });
             await page.locator('#historyAccountSocialLoadBtn').click();
             assert(await page.locator('#historyAccountSocialLoadBtn').isDisabled());
-            await page.locator('#historyAccountBackBtn').click();
+            await page.locator('#historyAccountHistoryBtn').click();
+            await page.locator('#historyView').waitFor();
+            await page.locator('[data-history-id="history-1"] .pinefetch-history-open-btn').click();
             await page.locator('#historyDetailsContent').waitFor();
             await page.evaluate(() => globalThis.__pinefetchUi.releaseAccount());
             assert(await page.locator('#historyAccountView').isHidden());
@@ -2366,6 +2387,14 @@ try {
             );
             assert.equal(await accountMetrics.locator('.pinefetch-social-metric').count(), 0);
             assert.match(await page.locator('#historyAccountSocialStatus').textContent(), /No public metrics/);
+            assert.match(
+                await page.locator('#historyAccountSocialUnavailableList').innerText(),
+                /Account identity could not be verified/
+            );
+            assert.doesNotMatch(
+                await page.locator('#historyAccountSocialUnavailableList').innerText(),
+                /Video identity/
+            );
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.unavailableAccount = false;
             });
@@ -2422,11 +2451,12 @@ try {
             });
             await page.locator('#historyAccountSavedList button').first().click();
             await page.locator('#historyDetailsContent').waitFor();
-            assert.match(await page.locator('#historyDetailsBackBtn').textContent(), /Back to account/);
+            assert.equal(await page.locator('#historyDetailsBreadcrumbAccount').textContent(), videos[0].uploader);
+            assert.equal(await page.locator('#historyDetailsBreadcrumbCurrent').textContent(), videos[0].title);
             await page.evaluate(() => {
                 globalThis.__pinefetchUi.failAccountRead = true;
             });
-            await page.locator('#historyDetailsBackBtn').click();
+            await page.locator('#historyDetailsAccountBreadcrumbBtn').click();
             await page.locator('#historyAccountRetryBtn').waitFor();
             assert(
                 await page.locator('#historyAccountStatus').evaluate(el => el.classList.contains('oj-status-error'))
@@ -2467,9 +2497,8 @@ try {
             );
             assert.equal(await page.locator('#urlInput').inputValue(), videos[0].url);
             await page.locator('#viewHistoryBtn').click();
-            await page.locator('#historyAccountBackBtn').click();
-            await page.locator('#historyDetailsContent').waitFor();
-            await closeDetails();
+            await page.locator('#historyAccountHistoryBtn').click();
+            await page.locator('#historyView').waitFor();
 
             // Social Insights load from SQLite on tab open; only a click starts a fetch.
             await openOcr('history-1');
@@ -3044,7 +3073,7 @@ try {
             assert(loadedFonts.some(url => url.includes('fa-solid')));
             assert.deepEqual(errors, []);
             console.log(
-                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, playlist auto-import/retry/deduplication/clipboard, history filters/creator/reset, account navigation/pagination/insights/profile video selection, transcription model/save rollback, menus, tabs, full-container details, local keyword counts/filtering/pagination/late replies, OCR frame grouping/native pagination/search/full export/confirmed deletion/late replies, background navigation, preserved History state, confirmations and switches passed.`
+                `[test:ui] ${engine.name()}: offline assets, preset restoration/keyboard/persistence, queue requests/progress, playlist auto-import/retry/deduplication/clipboard, history filters/creator/reset, breadcrumb hierarchy/keyboard/missing creator/retained History state, account navigation/pagination/insights/profile video selection, transcription model/save rollback, menus, tabs, full-container details, local keyword counts/filtering/pagination/late replies, OCR frame grouping/native pagination/search/full export/confirmed deletion/late replies, background navigation, confirmations and switches passed.`
             );
         } finally {
             await browser.close();
