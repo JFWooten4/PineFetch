@@ -327,7 +327,6 @@ export const createHistoryDetailsView = ({
         els.historyDetailsBreadcrumbAccount.textContent = '';
         els.historyDetailsAccountBreadcrumbBtn.removeAttribute('title');
         els.historyDetailsSubtitle.textContent = '';
-        els.historyDetailsAccountBtn.hidden = true;
         els.historyDetailsThumbnail.hidden = true;
         els.historyDetailsThumbnail.removeAttribute('src');
         els.historyDetailsHeader.classList.add('pinefetch-no-media');
@@ -357,8 +356,6 @@ export const createHistoryDetailsView = ({
             els.historyDetailsBreadcrumbAccount.textContent = account || '';
             els.historyDetailsAccountBreadcrumbBtn.title = account || '';
             els.historyDetailsAccountCrumb.hidden = !hasAccount;
-            els.historyDetailsAccountBtn.textContent = account ? `View account: ${account}` : '';
-            els.historyDetailsAccountBtn.hidden = !hasAccount;
             if (details.entry?.thumbnail) {
                 els.historyDetailsThumbnail.src = details.entry.thumbnail;
                 els.historyDetailsThumbnail.hidden = false;
@@ -494,9 +491,6 @@ export const createHistoryDetailsView = ({
         window.addEventListener('blur', () => hideContextMenu());
         els.historyList.addEventListener('scroll', () => hideContextMenu(), { passive: true });
 
-        els.historyDetailsAccountBtn.addEventListener('click', () => {
-            if (state.details?.entry?.id) openAccount(state.details.entry.id, els.historyDetailsAccountBtn);
-        });
         els.historyDetailsAccountBreadcrumbBtn.addEventListener('click', () => {
             if (state.details?.entry?.id) openAccount(state.details.entry.id, els.historyDetailsAccountBreadcrumbBtn);
         });

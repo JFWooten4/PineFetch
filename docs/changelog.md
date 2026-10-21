@@ -1,5 +1,6 @@
 # 2.5.1
 
+- Removed the extra View account button from History details; accounts remain accessible through breadcrumbs and the Creator link in Overview.
 - updating deps
 - Fixed TikTok account insights to use the public uploader URL instead of an internal account ID, retry unavailable saved addresses on refresh and preserve previous insights when account identity cannot be verified.
 - Replaced platform names in individual History items with available Font Awesome brand icons, keeping names as tooltips and screen-reader text and a visible name for platforms without an icon.

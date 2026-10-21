@@ -209,7 +209,6 @@ const els = Object.seal({
     historyAccountVideosStatus: document.getElementById('historyAccountVideosStatus'),
     historyAccountRemoteList: document.getElementById('historyAccountRemoteList'),
     historyAccountMoreVideosBtn: document.getElementById('historyAccountMoreVideosBtn'),
-    historyDetailsAccountBtn: document.getElementById('historyDetailsAccountBtn'),
     historyDetailsView: document.getElementById('historyDetailsView'),
     historyDetailsHeader: document.getElementById('historyDetailsHeader'),
     historyDetailsThumbnail: document.getElementById('historyDetailsThumbnail'),

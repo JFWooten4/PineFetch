@@ -1,7 +1,7 @@
 # Accounts in History
 
-Open a History entry, then click **View account** beside the platform or click
-its Creator in Overview. The Account view lists that creator's saved downloads,
+Open a History entry, then click its account breadcrumb or its Creator in
+Overview. The Account view lists that creator's saved downloads,
 with **Load more saved videos** for accounts with more than 20 entries. A saved
 video opens its existing details. Breadcrumbs show **History / Account** on an
 account page and **History / Account / Post title** on a saved post, including

@@ -2275,7 +2275,7 @@ try {
             // Account navigation is local; profile metrics and video discovery require explicit clicks.
             await openOcr('history-1');
             await page.locator('#historyOverviewTab').click();
-            await page.locator('#historyDetailsAccountBtn').click();
+            await page.locator('#historyDetailsAccountBreadcrumbBtn').click();
             await page.locator('#historyAccountView').waitFor();
             await page.waitForFunction(
                 () => globalThis.document.querySelector('#historyAccountSavedList').childElementCount > 0
@@ -2312,7 +2312,7 @@ try {
             await page.locator('#historyDetailsContent').waitFor();
             await page.evaluate(() => globalThis.__pinefetchUi.releaseAccount());
             assert(await page.locator('#historyAccountView').isHidden());
-            await page.locator('#historyDetailsAccountBtn').click();
+            await page.locator('#historyDetailsAccountBreadcrumbBtn').click();
             await page.waitForFunction(
                 () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 2
             );

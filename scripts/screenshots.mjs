@@ -214,7 +214,7 @@ try {
         keywords.result.terms.map(term => term.term)
     );
     await capture('keywords.webp');
-    await page.locator('#historyDetailsAccountBtn').click();
+    await page.locator('#historyDetailsAccountBreadcrumbBtn').click();
     await page.waitForFunction(
         () => globalThis.document.querySelector('#historyAccountSocialMetrics').childElementCount === 1
     );

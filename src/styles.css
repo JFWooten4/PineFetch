@@ -1242,12 +1242,6 @@ body {
     background: var(--oj-surface);
 }
 
-.pinefetch-details-byline {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--oj-space-2);
-}
 .pinefetch-account-link {
     min-height: 0;
     line-height: inherit;
