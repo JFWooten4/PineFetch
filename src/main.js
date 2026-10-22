@@ -55,6 +55,7 @@ const els = Object.seal({
     syncYoutubeCookiesBtn: document.getElementById('syncYoutubeCookiesBtn'),
     disconnectYoutubeCookiesBtn: document.getElementById('disconnectYoutubeCookiesBtn'),
     youtubeCookieStatus: document.getElementById('youtubeCookieStatus'),
+    youtubeCookieBrowser: document.getElementById('youtubeCookieBrowser'),
     linkDumpServerStatusBadge: document.getElementById('linkDumpServerStatusBadge'),
     linkDumpServerHint: document.getElementById('linkDumpServerHint'),
     linkDumpServerUrl: document.getElementById('linkDumpServerUrl'),

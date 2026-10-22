@@ -630,7 +630,7 @@ fn integration_loopback_cookie_sync_requires_pairing_enable_and_youtube_scope() 
             expected
         );
     }
-    state.processes.cookies.begin().unwrap();
+    state.processes.cookies.begin(None).unwrap();
     let mut bad = cookie.clone();
     bad["domain"] = "evil.test".into();
     let body = serde_json::to_vec(&json!({"secret":pairing.secret,"cookies":[bad]})).unwrap();

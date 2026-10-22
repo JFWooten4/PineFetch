@@ -247,7 +247,12 @@ export const installScreenshotBridge = ({ videos, version, ocr = null, social = 
                     case 'get_youtube_cookie_sync':
                         return structuredClone(cookieSyncStatus);
                     case 'begin_youtube_cookie_sync':
-                        cookieSyncStatus = { state: 'waiting', cookie_count: 0 };
+                        cookieSyncStatus = {
+                            state: 'waiting',
+                            cookie_count: 0,
+                            fallback_browser: args.browser,
+                            source: 'browser',
+                        };
                         return structuredClone(cookieSyncStatus);
                     case 'disconnect_youtube_cookie_sync':
                         cookieSyncStatus = { state: 'off', cookie_count: 0 };

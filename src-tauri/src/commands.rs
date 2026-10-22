@@ -161,14 +161,30 @@ pub(crate) async fn load_info(
 #[tauri::command]
 pub(crate) fn begin_youtube_cookie_sync(
     state: State<AppState>,
+    browser: String,
 ) -> Result<crate::cookie_sync::Status, String> {
-    state.processes.cookies.begin()
+    if !crate::cookie_sync::supported_browser(&browser) {
+        return Err("Choose a supported fallback browser".into());
+    }
+    update_config(&state.config, |config| {
+        config.youtube_cookie_browser = Some(browser.clone())
+    })?;
+    state.processes.cookies.begin(Some(browser))
 }
 #[tauri::command]
 pub(crate) fn get_youtube_cookie_sync(
     state: State<AppState>,
 ) -> Result<crate::cookie_sync::Status, String> {
-    state.processes.cookies.status()
+    let mut status = state.processes.cookies.status()?;
+    if status.fallback_browser.is_none() {
+        status.fallback_browser = state
+            .config
+            .lock()
+            .map_err(|_| "Config unavailable")?
+            .youtube_cookie_browser
+            .clone();
+    }
+    Ok(status)
 }
 #[tauri::command]
 pub(crate) fn disconnect_youtube_cookie_sync(

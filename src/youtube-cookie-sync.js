@@ -9,17 +9,22 @@ export const createYoutubeCookieSync = ({ els, api, schedule = setTimeout, cance
         els.youtubeCookieStatus.classList.toggle('oj-status-error', error);
     };
     const render = () => {
+        els.youtubeCookieBrowser.disabled = busy;
         els.syncYoutubeCookiesBtn.disabled = busy || !api.available || !loaded;
         els.disconnectYoutubeCookiesBtn.disabled = busy || current.state === 'off';
-        els.syncYoutubeCookiesBtn.textContent = current.state === 'ready' ? 'Sync Again' : 'Enable Cookie Sync';
+        els.syncYoutubeCookiesBtn.textContent = ['ready', 'reader'].includes(current.state)
+            ? 'Sync Again'
+            : 'Enable Cookie Sync';
     };
     const showConnection = () => {
         status(
             current.state === 'ready'
-                ? 'YouTube cookies synced from Link Dump for this app session.'
+                ? 'YouTube cookies synced from Link Dump for this app session. The yt-dlp reader is available as fallback.'
                 : current.state === 'waiting'
-                  ? 'Waiting for Link Dump. Open the extension and click Sync YouTube Cookies. This request expires in five minutes.'
-                  : 'Cookie sync is off. Enable it, then sync from Link Dump.'
+                  ? 'Waiting for Link Dump. Open the extension and click Sync YouTube Cookies. Until then, YouTube requests use the yt-dlp browser reader. The extension sync request expires in five minutes.'
+                  : current.state === 'reader'
+                    ? 'Using the yt-dlp browser reader. Sync from Link Dump to use extension cookies instead.'
+                    : 'Cookie sync is off. Enable it to use Link Dump with the yt-dlp reader as fallback.'
         );
         render();
     };
@@ -35,6 +40,7 @@ export const createYoutubeCookieSync = ({ els, api, schedule = setTimeout, cance
             const next = await api.getYoutubeCookieSync();
             if (started !== revision || busy) return;
             current = next;
+            if (!loaded && next.fallback_browser) els.youtubeCookieBrowser.value = next.fallback_browser;
             loaded = true;
             showConnection();
         } catch {
@@ -50,7 +56,9 @@ export const createYoutubeCookieSync = ({ els, api, schedule = setTimeout, cance
         cancel(timer);
         render();
         try {
-            current = enable ? await api.beginYoutubeCookieSync() : await api.disconnectYoutubeCookieSync();
+            current = enable
+                ? await api.beginYoutubeCookieSync({ browser: els.youtubeCookieBrowser.value })
+                : await api.disconnectYoutubeCookieSync();
             showConnection();
         } catch {
             status('Cookie sync could not be updated. Please try again.', true);
