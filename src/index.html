@@ -400,6 +400,61 @@
                     </div>
 
                     <div id="linkDumpView" class="pinefetch-panel-view oj-stack" hidden>
+                        <section class="oj-panel oj-panel-compact pinefetch-link-dump-section">
+                            <header class="oj-section-header">
+                                <div class="pinefetch-panel-heading">
+                                    <h3 class="oj-heading-3">YouTube Cookie Sync</h3>
+                                    <p class="oj-caption">
+                                        Use the YouTube account from your paired Link Dump browser extension for
+                                        downloads, playlists, and metadata requests.
+                                    </p>
+                                </div>
+                            </header>
+                            <label class="oj-field" for="youtubeCookieBrowser">
+                                <span class="oj-label">Fallback browser</span>
+                                <select id="youtubeCookieBrowser" class="oj-input">
+                                    <option value="brave">Brave</option>
+                                    <option value="chrome">Chrome</option>
+                                    <option value="chromium">Chromium</option>
+                                    <option value="edge">Edge</option>
+                                    <option value="firefox">Firefox</option>
+                                    <option value="opera">Opera</option>
+                                    <option value="safari">Safari</option>
+                                    <option value="vivaldi">Vivaldi</option>
+                                </select>
+                            </label>
+                            <div class="oj-cluster">
+                                <button id="syncYoutubeCookiesBtn" class="oj-button" type="button" disabled>
+                                    Enable Cookie Sync
+                                </button>
+                                <button
+                                    id="disconnectYoutubeCookiesBtn"
+                                    class="oj-button oj-button-ghost"
+                                    type="button"
+                                    disabled
+                                >
+                                    Disconnect
+                                </button>
+                            </div>
+                            <p class="oj-helper">
+                                Pair the Link Dump extension using a connection secret below. Click Enable Cookie Sync,
+                                then open Link Dump in the browser where you are signed in to YouTube and click Sync
+                                YouTube Cookies. Approve its cookie permission request if asked.
+                            </p>
+                            <p class="oj-helper">
+                                Link Dump cookies take priority. If none are available, they expire, or they cannot be
+                                prepared, yt-dlp reads cookies directly from the fallback browser for YouTube requests.
+                                Approve any browser-storage permission prompt if asked.
+                            </p>
+                            <p class="oj-helper">
+                                Only YouTube cookies are sent to this PineFetch instance. They are kept for this app
+                                session; sync again after restarting PineFetch or when your login changes. Disconnect
+                                turns off both cookie sources for new requests. Cookies do not guarantee avoiding rate
+                                limits.
+                            </p>
+                            <p id="youtubeCookieStatus" class="oj-status" role="status" aria-live="polite"></p>
+                        </section>
+
                         <section class="oj-panel oj-panel-compact pinefetch-link-dump-section" id="linkDumpServerPanel">
                             <header class="oj-section-header">
                                 <div class="pinefetch-panel-heading">

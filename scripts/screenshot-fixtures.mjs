@@ -3,6 +3,7 @@
 export const installScreenshotBridge = ({ videos, version, ocr = null, social = null, keywords = null }) => {
     const listeners = new Map();
     const queue = [];
+    let cookieSyncStatus = { state: 'off', cookie_count: 0 };
     let ready = false;
     const config = {
         default_output_dir: '/Users/demo/Downloads/PineFetch',
@@ -243,6 +244,19 @@ export const installScreenshotBridge = ({ videos, version, ocr = null, social = 
                                 },
                             ],
                         };
+                    case 'get_youtube_cookie_sync':
+                        return structuredClone(cookieSyncStatus);
+                    case 'begin_youtube_cookie_sync':
+                        cookieSyncStatus = {
+                            state: 'waiting',
+                            cookie_count: 0,
+                            fallback_browser: args.browser,
+                            source: 'browser',
+                        };
+                        return structuredClone(cookieSyncStatus);
+                    case 'disconnect_youtube_cookie_sync':
+                        cookieSyncStatus = { state: 'off', cookie_count: 0 };
+                        return structuredClone(cookieSyncStatus);
                     case 'get_yt_dlp_installed_version':
                         return { version: '2026.09.19', path: '/demo/yt-dlp' };
                     default:

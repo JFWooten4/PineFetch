@@ -3,6 +3,9 @@ import { test } from 'node:test';
 import { createTauriClient } from '../src/tauri-client.js';
 
 const commands = {
+    beginYoutubeCookieSync: 'begin_youtube_cookie_sync',
+    getYoutubeCookieSync: 'get_youtube_cookie_sync',
+    disconnectYoutubeCookieSync: 'disconnect_youtube_cookie_sync',
     cacheLastDownloadUrl: 'cache_last_download_url',
     cancelDownload: 'cancel_download',
     clearHistory: 'clear_history',

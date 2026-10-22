@@ -328,6 +328,7 @@ pub(crate) fn fetch_videos(
         target,
     ]);
     let mut command = Command::new(yt_dlp);
+    let _cookies = crate::cookie_sync::apply(&mut command, &profile_url, processes)?;
     command.args(args);
     let output = crate::process::run_command_output(
         command,
@@ -590,7 +591,7 @@ mod tests {
         let root = TempRoot::new("account-migration");
         let path = root.path("history.sqlite");
         let conn = database::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE history_account_insights; DROP INDEX idx_history_account_lookup; PRAGMA user_version=5; INSERT INTO history_entries(id,url,source,uploader,title,created_at) VALUES ('one','https://www.youtube.com/watch?v=abcdefghijk','youtube','Creator','Original',1)").unwrap();
+        conn.execute_batch("DROP TABLE history_account_insights; DROP INDEX idx_history_account_lookup; ALTER TABLE app_config DROP COLUMN youtube_cookie_browser; PRAGMA user_version=5; INSERT INTO history_entries(id,url,source,uploader,title,created_at) VALUES ('one','https://www.youtube.com/watch?v=abcdefghijk','youtube','Creator','Original',1)").unwrap();
         drop(conn);
         let before = fs::read(&path).unwrap();
         assert!(database::open_with_hook(&path, |point| {

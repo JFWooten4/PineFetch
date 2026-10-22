@@ -144,6 +144,7 @@ pub(crate) fn load_playlist(
 ) -> Result<Playlist, String> {
     let url = normalize_playlist_url(url).ok_or("Enter a valid YouTube playlist link.")?;
     let mut command = Command::new(yt_dlp);
+    let _cookies = crate::cookie_sync::apply(&mut command, &url, state)?;
     command.args(playlist_args(&url, deno));
     let output = run_command_output(command, None, Some(state), Some(Duration::from_secs(180)))
         .map_err(|error| format!("Could not load the YouTube playlist: {error}"))?;

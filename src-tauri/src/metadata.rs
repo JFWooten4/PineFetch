@@ -23,6 +23,7 @@ pub(crate) fn load_raw_info(
     state: &crate::process::ProcessState,
 ) -> Result<String, String> {
     let mut command = Command::new(yt_dlp);
+    let _cookies = crate::cookie_sync::apply(&mut command, url, state)?;
     command.args(build_info_args(url, deno));
     let output = run_command_output(command, None, Some(state), Some(INFO_TIMEOUT))
         .map_err(|e| format!("Failed to run yt-dlp: {e}"))?;
