@@ -12,15 +12,8 @@ pub(crate) fn load_info_with_yt_dlp(
     deno: Option<String>,
     url: String,
     state: &crate::process::ProcessState,
-    browser: Option<&str>,
 ) -> Result<InfoResponse, String> {
-    parse_info_json(&load_raw_info(
-        &yt_dlp,
-        deno.as_deref(),
-        &url,
-        state,
-        browser,
-    )?)
+    parse_info_json(&load_raw_info(&yt_dlp, deno.as_deref(), &url, state)?)
 }
 
 pub(crate) fn load_raw_info(
@@ -28,10 +21,9 @@ pub(crate) fn load_raw_info(
     deno: Option<&str>,
     url: &str,
     state: &crate::process::ProcessState,
-    browser: Option<&str>,
 ) -> Result<String, String> {
     let mut command = Command::new(yt_dlp);
-    crate::yt_dlp::apply_browser_cookies(&mut command, url, browser);
+    let _cookies = crate::cookie_sync::apply(&mut command, url, state)?;
     command.args(build_info_args(url, deno));
     let output = run_command_output(command, None, Some(state), Some(INFO_TIMEOUT))
         .map_err(|e| format!("Failed to run yt-dlp: {e}"))?;

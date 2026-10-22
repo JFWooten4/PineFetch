@@ -244,6 +244,9 @@ pub(super) fn serve_link_dump_request(
     }
 
     match path.as_str() {
+        "/syncYoutubeCookies/" | "/syncYoutubeCookies" => {
+            handle_sync_youtube_cookies(state, &mut stream, &request.body)
+        }
         "/addVideoLinkToQueue/" | "/addVideoLinkToQueue" => {
             handle_add_video_link(state, &mut stream, &request.body, &enqueue)
         }
@@ -261,7 +264,9 @@ pub(super) fn serve_link_dump_request(
 pub(super) fn is_link_dump_endpoint(path: &str) -> bool {
     matches!(
         path,
-        "/addVideoLinkToQueue/"
+        "/syncYoutubeCookies/"
+            | "/syncYoutubeCookies"
+            | "/addVideoLinkToQueue/"
             | "/addVideoLinkToQueue"
             | "/addVideoLinksToQueue/"
             | "/addVideoLinksToQueue"
@@ -704,5 +709,45 @@ pub(super) struct ActiveConnectionPermit(Arc<AtomicUsize>);
 impl Drop for ActiveConnectionPermit {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SyncYoutubeCookiesBody {
+    secret: Option<String>,
+    cookies: Vec<crate::cookie_sync::BrowserCookie>,
+}
+fn handle_sync_youtube_cookies(
+    state: &AppState,
+    stream: &mut TcpStream,
+    body: &[u8],
+) -> Result<(), String> {
+    let Ok(parsed) = serde_json::from_slice::<SyncYoutubeCookiesBody>(body) else {
+        return write_json_response(
+            stream,
+            400,
+            &json!({"ok":false,"error":"Invalid cookie sync request"}),
+        );
+    };
+    match validate_link_dump_secret(&state.db, parsed.secret.as_deref()) {
+        Ok(Some(_)) => (),
+        Ok(None) => {
+            return write_json_response(stream, 401, &json!({"ok":false,"error":"Unauthorized"}))
+        }
+        Err(_) => {
+            return write_json_response(
+                stream,
+                500,
+                &json!({"ok":false,"error":"Cookie sync unavailable"}),
+            )
+        }
+    }
+    match state.processes.cookies.receive(parsed.cookies) {
+        Ok(status) => write_json_response(stream, 200, &json!({"ok":true,"status":status})),
+        Err(_) => write_json_response(
+            stream,
+            400,
+            &json!({"ok":false,"error":"Enable Cookie Sync in PineFetch and send current YouTube cookies"}),
+        ),
     }
 }

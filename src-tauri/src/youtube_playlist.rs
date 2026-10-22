@@ -141,11 +141,10 @@ pub(crate) fn load_playlist(
     deno: Option<&str>,
     url: &str,
     state: &ProcessState,
-    browser: Option<&str>,
 ) -> Result<Playlist, String> {
     let url = normalize_playlist_url(url).ok_or("Enter a valid YouTube playlist link.")?;
     let mut command = Command::new(yt_dlp);
-    crate::yt_dlp::apply_browser_cookies(&mut command, &url, browser);
+    let _cookies = crate::cookie_sync::apply(&mut command, &url, state)?;
     command.args(playlist_args(&url, deno));
     let output = run_command_output(command, None, Some(state), Some(Duration::from_secs(180)))
         .map_err(|error| format!("Could not load the YouTube playlist: {error}"))?;
@@ -328,7 +327,6 @@ mod tests {
             None,
             "https://youtube.com/playlist?list=PL_test",
             &processes,
-            None,
         )
         .unwrap();
         assert_eq!(playlist.entries.len(), 1);
@@ -342,8 +340,7 @@ mod tests {
             executable.to_str().unwrap(),
             None,
             "https://youtube.com/playlist?list=PL_test",
-            &processes,
-            None
+            &processes
         )
         .unwrap_err()
         .contains("private playlist"));
@@ -357,8 +354,7 @@ mod tests {
             executable.to_str().unwrap(),
             None,
             "https://youtube.com/playlist?list=PL_test",
-            &processes,
-            None
+            &processes
         )
         .unwrap_err()
         .contains("private playlist"));

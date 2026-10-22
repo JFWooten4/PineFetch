@@ -216,6 +216,7 @@ pub(crate) fn run_command_output(
 
 #[derive(Default)]
 pub(crate) struct ProcessState {
+    pub(crate) cookies: crate::cookie_sync::CookieSyncState,
     pub(crate) current_job_id: Mutex<Option<String>>,
     pub(crate) current_child: Mutex<Option<Arc<Mutex<Child>>>>,
     pub(crate) utility_children: Mutex<Vec<Arc<Mutex<Child>>>>,

@@ -152,33 +152,29 @@ pub(crate) async fn load_info(
     let app_handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle.state::<AppState>();
-        let browser = state
-            .config
-            .lock()
-            .map_err(|_| "Config lock poisoned")?
-            .youtube_cookie_browser
-            .clone();
-        load_info_with_yt_dlp(yt_dlp, deno, url, &state.processes, browser.as_deref())
+        load_info_with_yt_dlp(yt_dlp, deno, url, &state.processes)
     })
     .await
     .map_err(|e| format!("Info task failed: {e}"))?
 }
 
 #[tauri::command]
-pub(crate) async fn check_youtube_cookie_access(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    browser: String,
-) -> Result<(), String> {
-    let yt_dlp =
-        resolve_yt_dlp(&app, &state.config).map_err(|_| "YT_DLP_UNAVAILABLE".to_string())?;
-    let deno = resolve_deno_executable(&app);
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        crate::cookie_sync::check_access(&yt_dlp, deno.as_deref(), &browser, &state.processes)
-    })
-    .await
-    .map_err(|_| "COOKIE_ACCESS_FAILED".to_string())?
+pub(crate) fn begin_youtube_cookie_sync(
+    state: State<AppState>,
+) -> Result<crate::cookie_sync::Status, String> {
+    state.processes.cookies.begin()
+}
+#[tauri::command]
+pub(crate) fn get_youtube_cookie_sync(
+    state: State<AppState>,
+) -> Result<crate::cookie_sync::Status, String> {
+    state.processes.cookies.status()
+}
+#[tauri::command]
+pub(crate) fn disconnect_youtube_cookie_sync(
+    state: State<AppState>,
+) -> Result<crate::cookie_sync::Status, String> {
+    state.processes.cookies.disconnect()
 }
 
 #[tauri::command]
@@ -531,7 +527,6 @@ pub(crate) async fn enqueue_playlist(
             deno.as_deref(),
             &url,
             &state.processes,
-            config.youtube_cookie_browser.as_deref(),
         )?;
         let result = crate::youtube_playlist::build_jobs(request, playlist, &config, output_dir);
         crate::worker::enqueue_download_jobs(&app, &state, result.jobs.clone())?;
@@ -634,6 +629,7 @@ pub(crate) fn revoke_link_dump_secret(
     id: String,
 ) -> Result<Vec<LinkDumpSecretView>, String> {
     revoke_link_dump_secret_in_db(&state.db, &id)?;
+    state.processes.cookies.disconnect()?;
     list_link_dump_secrets(&state.db)
 }
 
@@ -643,6 +639,7 @@ pub(crate) fn delete_link_dump_secret(
     id: String,
 ) -> Result<Vec<LinkDumpSecretView>, String> {
     delete_link_dump_secret_in_db(&state.db, &id)?;
+    state.processes.cookies.disconnect()?;
     list_link_dump_secrets(&state.db)
 }
 

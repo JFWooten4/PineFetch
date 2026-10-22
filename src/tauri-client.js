@@ -5,7 +5,9 @@ export const createTauriClient = tauri => {
     const listen = tauri?.event?.listen;
     return Object.freeze({
         available: Boolean(invoke),
-        checkYoutubeCookieAccess: args => invoke('check_youtube_cookie_access', args),
+        beginYoutubeCookieSync: args => invoke('begin_youtube_cookie_sync', args),
+        getYoutubeCookieSync: args => invoke('get_youtube_cookie_sync', args),
+        disconnectYoutubeCookieSync: args => invoke('disconnect_youtube_cookie_sync', args),
         eventsAvailable: Boolean(listen),
         readClipboardPlugin: () => (typeof tauri?.clipboard?.readText === 'function' ? tauri.clipboard.readText() : ''),
         cacheLastDownloadUrl: args => invoke('cache_last_download_url', args),

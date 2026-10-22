@@ -1,87 +1,68 @@
-export const cookiePermissionHelp = platform => {
-    if (/mac/i.test(platform)) {
-        return 'macOS: A Keychain prompt may mention “Brave Safe Storage” or “Chrome Safe Storage”. Enter your Mac login password in that system prompt and choose Always Allow, if available, to remember access for the requesting program. Allow grants access only this time.';
-    }
-    if (/win/i.test(platform)) {
-        return 'Windows: Cookie access may work without a prompt. If it fails, close the selected browser and retry. Some Chromium browsers protect cookies in a way yt-dlp cannot decrypt; try Firefox if needed.';
-    }
-    if (/linux/i.test(platform)) {
-        return 'Linux: Your desktop may ask you to unlock its keyring or wallet. Approve browser-cookie access there; whether approval can be remembered depends on your desktop. If access fails, close the browser and retry.';
-    }
-    return 'Your system may ask for browser-cookie access. Approve the request in the system prompt. If access fails, close the selected browser and retry.';
-};
-
-export const createYoutubeCookieSync = ({
-    els,
-    api,
-    platform = globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform || '',
-}) => {
-    if (els.youtubeCookiePermissionHelp) els.youtubeCookiePermissionHelp.textContent = cookiePermissionHelp(platform);
-    let connectedBrowser = null;
+export const createYoutubeCookieSync = ({ els, api, schedule = setTimeout, cancel = clearTimeout }) => {
+    let current = { state: 'off', cookie_count: 0 };
     let busy = false;
     let loaded = false;
-
+    let revision = 0;
+    let timer;
     const status = (message, error = false) => {
         els.youtubeCookieStatus.textContent = message;
         els.youtubeCookieStatus.classList.toggle('oj-status-error', error);
     };
     const render = () => {
-        els.youtubeCookieBrowser.disabled = busy;
         els.syncYoutubeCookiesBtn.disabled = busy || !api.available || !loaded;
-        els.disconnectYoutubeCookiesBtn.disabled = busy || !connectedBrowser;
+        els.disconnectYoutubeCookiesBtn.disabled = busy || current.state === 'off';
+        els.syncYoutubeCookiesBtn.textContent = current.state === 'ready' ? 'Sync Again' : 'Enable Cookie Sync';
     };
     const showConnection = () => {
-        if (connectedBrowser) {
-            els.youtubeCookieBrowser.value = connectedBrowser;
-            status(
-                `Cookie sync enabled for ${connectedBrowser}. Cookies will be read when the next YouTube request starts.`
-            );
-        } else {
-            status('Cookie sync is off.');
-        }
+        status(
+            current.state === 'ready'
+                ? 'YouTube cookies synced from Link Dump for this app session.'
+                : current.state === 'waiting'
+                  ? 'Waiting for Link Dump. Open the extension and click Sync YouTube Cookies. This request expires in five minutes.'
+                  : 'Cookie sync is off. Enable it, then sync from Link Dump.'
+        );
         render();
     };
-    const load = async () => {
+    const poll = () => {
+        cancel(timer);
+        if (current.state === 'off') return;
+        timer = schedule(() => void refresh(), current.state === 'waiting' ? 1000 : 5000);
+        timer?.unref?.();
+    };
+    const refresh = async () => {
+        const started = revision;
         try {
-            const config = await api.getConfig();
-            connectedBrowser = config.youtube_cookie_browser || null;
+            const next = await api.getYoutubeCookieSync();
+            if (started !== revision || busy) return;
+            current = next;
             loaded = true;
             showConnection();
         } catch {
-            status('Cookie sync settings could not be loaded. Reopen Browser Import to retry.', true);
+            if (started === revision && !busy)
+                status('Cookie sync status could not be loaded. Reopen Browser Import to retry.', true);
         }
+        poll();
     };
-    const save = async browser => {
+    const change = async enable => {
         if (busy || !api.available || !loaded) return;
+        revision++;
         busy = true;
+        cancel(timer);
         render();
-        let checkingAccess = Boolean(browser);
         try {
-            if (browser) {
-                status('Checking browser-cookie access… Complete any system permission prompt to continue.');
-                await api.checkYoutubeCookieAccess({ browser });
-            }
-            checkingAccess = false;
-            const config = await api.patchConfig({ changes: { youtube_cookie_browser: browser } });
-            connectedBrowser = config.youtube_cookie_browser || null;
+            current = enable ? await api.beginYoutubeCookieSync() : await api.disconnectYoutubeCookieSync();
             showConnection();
-        } catch (error) {
-            status(
-                checkingAccess
-                    ? String(error) === 'YT_DLP_UNAVAILABLE'
-                        ? 'yt-dlp was not found. Set its path in Settings, then enable cookie sync again.'
-                        : 'Browser-cookie access could not be verified. Check the permission guidance above and your internet connection, then try again. Your saved connection has not changed.'
-                    : 'Cookie sync settings could not be saved. Please try again.',
-                true
-            );
+        } catch {
+            status('Cookie sync could not be updated. Please try again.', true);
         } finally {
             busy = false;
             render();
+            poll();
         }
     };
     const bindEvents = () => {
-        els.syncYoutubeCookiesBtn.addEventListener('click', () => void save(els.youtubeCookieBrowser.value));
-        els.disconnectYoutubeCookiesBtn.addEventListener('click', () => void save(null));
+        els.syncYoutubeCookiesBtn.addEventListener('click', () => void change(true));
+        els.disconnectYoutubeCookiesBtn.addEventListener('click', () => void change(false));
     };
-    return Object.freeze({ load, bindEvents, isLoaded: () => loaded });
+    return Object.freeze({ load: refresh, bindEvents, isLoaded: () => loaded });
 };

@@ -604,3 +604,47 @@ fn integration_nonblocking_listener_accepts_fragmented_http_request_without_prem
     assert_eq!(parsed.method, "POST");
     handler.join().unwrap();
 }
+
+#[test]
+fn integration_loopback_cookie_sync_requires_pairing_enable_and_youtube_scope() {
+    let state = test_state();
+    let pairing = crate::link_dump_store::create_link_dump_secret_in_db(
+        &state.db,
+        Some("synthetic cookie fixture".into()),
+    )
+    .unwrap();
+    let server = LoopbackServer::new(Arc::clone(&state));
+    let cookie = json!({"domain":".youtube.com","path":"/","name":"synthetic","value":"synthetic","secure":true});
+    for (secret, domain, expected) in [
+        ("wrong", ".youtube.com", 401),
+        (pairing.secret.as_str(), ".youtube.com", 400),
+    ] {
+        let mut payload_cookie = cookie.clone();
+        payload_cookie["domain"] = domain.into();
+        let body =
+            serde_json::to_vec(&json!({"secret":secret,"cookies":[payload_cookie]})).unwrap();
+        assert_eq!(
+            server
+                .exchange(&request("POST", "/syncYoutubeCookies/", &body), false)
+                .0,
+            expected
+        );
+    }
+    state.processes.cookies.begin().unwrap();
+    let mut bad = cookie.clone();
+    bad["domain"] = "evil.test".into();
+    let body = serde_json::to_vec(&json!({"secret":pairing.secret,"cookies":[bad]})).unwrap();
+    assert_eq!(
+        server
+            .exchange(&request("POST", "/syncYoutubeCookies/", &body), false)
+            .0,
+        400
+    );
+    let body = serde_json::to_vec(&json!({"secret":pairing.secret,"cookies":[cookie]})).unwrap();
+    let (status, reply) = server.exchange(&request("POST", "/syncYoutubeCookies/", &body), false);
+    assert_eq!(status, 200);
+    assert_eq!(reply["status"]["state"], "ready");
+    assert_eq!(reply["status"]["cookie_count"], 1);
+    assert!(!reply.to_string().contains("synthetic"));
+    assert_eq!(state.processes.cookies.disconnect().unwrap().state, "off");
+}

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createYoutubeCookieSync, cookiePermissionHelp } from '../src/youtube-cookie-sync.js';
-
-const setup = api => {
+import { createYoutubeCookieSync } from '../src/youtube-cookie-sync.js';
+const settle = () => new Promise(resolve => setImmediate(resolve));
+const setup = overrides => {
     const element = () => ({
-        value: 'brave',
         disabled: true,
         textContent: '',
         classList: { toggle() {} },
@@ -13,119 +12,77 @@ const setup = api => {
         },
     });
     const els = Object.fromEntries(
-        ['youtubeCookieBrowser', 'syncYoutubeCookiesBtn', 'disconnectYoutubeCookiesBtn', 'youtubeCookieStatus'].map(
-            key => [key, element()]
-        )
+        ['syncYoutubeCookiesBtn', 'disconnectYoutubeCookiesBtn', 'youtubeCookieStatus'].map(key => [key, element()])
     );
-    const view = createYoutubeCookieSync({ els, api: { available: true, ...api } });
+    let nextPoll;
+    const api = { available: true, getYoutubeCookieSync: async () => ({ state: 'off' }), ...overrides };
+    const view = createYoutubeCookieSync({
+        els,
+        api,
+        schedule: callback => {
+            nextPoll = callback;
+        },
+        cancel() {},
+    });
     view.bindEvents();
-    return { els, view };
+    return { els, view, poll: () => nextPoll?.() };
 };
-const settle = () => new Promise(resolve => setImmediate(resolve));
-
-test('restores saved browser, enables fresh cookie reads, and disconnects with a nullable patch', async () => {
-    const calls = [];
-    const checks = [];
-    const { els, view } = setup({
-        checkYoutubeCookieAccess: async args => {
-            checks.push(args);
+test('opening only reads status; Enable waits for Link Dump and a later sync updates the page', async () => {
+    let requests = 0;
+    let current = { state: 'off' };
+    const { els, view, poll } = setup({
+        getYoutubeCookieSync: async () => current,
+        beginYoutubeCookieSync: async () => {
+            requests++;
+            return { state: 'waiting' };
         },
-        getConfig: async () => ({ youtube_cookie_browser: 'firefox' }),
-        patchConfig: async ({ changes }) => {
-            calls.push(changes);
-            return changes;
-        },
+        disconnectYoutubeCookieSync: async () => ({ state: 'off' }),
     });
     await view.load();
-    assert.equal(els.youtubeCookieBrowser.value, 'firefox');
-    assert.deepEqual(checks, []);
-    assert.equal(els.disconnectYoutubeCookiesBtn.disabled, false);
-    els.youtubeCookieBrowser.value = 'brave';
+    assert.equal(requests, 0);
     els.syncYoutubeCookiesBtn.click();
-    assert.equal(els.syncYoutubeCookiesBtn.disabled, true);
     await settle();
-    assert.deepEqual(calls, [{ youtube_cookie_browser: 'brave' }]);
-    assert.deepEqual(checks, [{ browser: 'brave' }]);
-    assert.match(els.youtubeCookieStatus.textContent, /next YouTube request/);
+    assert.equal(requests, 1);
+    assert.match(els.youtubeCookieStatus.textContent, /Waiting for Link Dump/);
+    current = { state: 'ready', cookie_count: 1 };
+    poll();
+    await settle();
+    assert.match(els.youtubeCookieStatus.textContent, /synced from Link Dump/);
     els.disconnectYoutubeCookiesBtn.click();
     await settle();
-    assert.equal(calls[1].youtube_cookie_browser, null);
-    assert.equal(checks.length, 1);
     assert.equal(els.disconnectYoutubeCookiesBtn.disabled, true);
-    assert.equal(els.youtubeCookieStatus.textContent, 'Cookie sync is off.');
 });
-
-test('failed save preserves the connection and never displays backend details', async () => {
+test('failed changes preserve existing connection and do not expose backend details', async () => {
     const { els, view } = setup({
-        getConfig: async () => ({ youtube_cookie_browser: 'brave' }),
-        patchConfig: async () => {
-            throw new Error('synthetic private backend detail');
+        getYoutubeCookieSync: async () => ({ state: 'ready' }),
+        disconnectYoutubeCookieSync: async () => {
+            throw new Error('private detail');
         },
     });
     await view.load();
     els.disconnectYoutubeCookiesBtn.click();
     await settle();
     assert.equal(els.disconnectYoutubeCookiesBtn.disabled, false);
-    assert.match(els.youtubeCookieStatus.textContent, /could not be saved/);
+    assert.match(els.youtubeCookieStatus.textContent, /could not be updated/);
     assert.doesNotMatch(els.youtubeCookieStatus.textContent, /private/);
 });
-
-test('load failure leaves sync disabled and permits retry', async () => {
-    let attempt = 0;
-    const { els, view } = setup({
-        getConfig: async () => {
-            if (!attempt++) throw new Error('unavailable');
-            return {};
-        },
+test('a stale poll cannot reconnect the UI after disconnect', async () => {
+    let reply;
+    let calls = 0;
+    const { els, view, poll } = setup({
+        getYoutubeCookieSync: () =>
+            ++calls === 1
+                ? Promise.resolve({ state: 'ready' })
+                : new Promise(resolve => {
+                      reply = resolve;
+                  }),
+        disconnectYoutubeCookieSync: async () => ({ state: 'off' }),
     });
     await view.load();
-    assert.equal(view.isLoaded(), false);
-    assert.equal(els.syncYoutubeCookiesBtn.disabled, true);
-    await view.load();
-    assert.equal(view.isLoaded(), true);
-    assert.equal(els.syncYoutubeCookiesBtn.disabled, false);
-});
-
-test('enable waits for access approval, prevents duplicate checks, and preserves saved settings on failure', async () => {
-    let rejectCheck;
-    let checks = 0;
-    let saves = 0;
-    const { els, view } = setup({
-        getConfig: async () => ({ youtube_cookie_browser: 'firefox' }),
-        checkYoutubeCookieAccess: () => {
-            checks++;
-            return new Promise((resolve, reject) => {
-                rejectCheck = reject;
-            });
-        },
-        patchConfig: async () => {
-            saves++;
-            return {};
-        },
-    });
-    await view.load();
-    els.youtubeCookieBrowser.value = 'brave';
-    els.syncYoutubeCookiesBtn.click();
-    els.syncYoutubeCookiesBtn.click();
-    assert.equal(checks, 1);
-    assert.equal(saves, 0);
-    assert.equal(els.youtubeCookieBrowser.disabled, true);
-    assert.match(els.youtubeCookieStatus.textContent, /Checking browser-cookie access/);
-    rejectCheck(new Error('synthetic private error'));
+    poll();
+    els.disconnectYoutubeCookiesBtn.click();
     await settle();
-    assert.equal(saves, 0);
-    assert.equal(els.disconnectYoutubeCookiesBtn.disabled, false);
-    assert.equal(els.youtubeCookieBrowser.disabled, false);
-    assert.match(els.youtubeCookieStatus.textContent, /saved connection has not changed/);
-    assert.doesNotMatch(els.youtubeCookieStatus.textContent, /private/);
-});
-
-test('permission guidance matches the operating system', () => {
-    assert.match(cookiePermissionHelp('MacIntel'), /Always Allow/);
-    assert.match(cookiePermissionHelp('macOS'), /Keychain/);
-    assert.match(cookiePermissionHelp('Win32'), /Windows:/);
-    assert.match(cookiePermissionHelp('Windows'), /Firefox/);
-    assert.doesNotMatch(cookiePermissionHelp('Windows'), /Mac login/);
-    assert.match(cookiePermissionHelp('Linux x86_64'), /keyring or wallet/);
-    assert.match(cookiePermissionHelp('unknown'), /Your system/);
+    reply({ state: 'ready' });
+    await settle();
+    assert.match(els.youtubeCookieStatus.textContent, /Cookie sync is off/);
 });

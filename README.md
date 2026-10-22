@@ -45,7 +45,7 @@ Download the macOS DMG from the [latest release](https://github.com/oliverjessne
 
 On first launch, choose a download folder in the Download view. If yt-dlp is not detected, set its executable path in **Settings**.
 
-To use your signed-in YouTube account, open **Browser Import → YouTube Cookie Sync**, select the browser where you are signed in, and click **Enable Cookie Sync**. Approve any browser-storage permission prompt to continue. PineFetch checks access without downloading a video and saves your selection after the check succeeds. yt-dlp then reads fresh cookies for YouTube downloads, playlists, and metadata requests. Use **Disconnect** to stop syncing. PineFetch stores only the browser selection; it does not export a cookie file. Cookies do not guarantee avoiding rate limits.
+To use your signed-in YouTube account, pair the Link Dump extension in **Browser Import**, then click **Enable Cookie Sync**. Open Link Dump in the browser where you are signed in and choose **Sync YouTube Cookies**, approving its cookie permission request if asked. The extension sends only YouTube cookies over the paired local connection. PineFetch uses them for downloads, playlists, and metadata requests during the current app session. Sync again after restarting PineFetch or when your login changes. **Disconnect** stops their use for new requests. Cookies do not guarantee avoiding rate limits.
 
 ## CLI
 
